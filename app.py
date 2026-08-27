@@ -10,6 +10,9 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# Her 1 saniyede bir verileri ve saati otomatik akıcı yenileme kuralı
+st.markdown('<meta http-equiv="refresh" content="1">', unsafe_allow_html=True)
+
 # CSS İle Özel Koyu Tema
 st.markdown("""
 <style>
@@ -32,7 +35,7 @@ st.markdown("""
         padding: 8px 12px;
         border-radius: 8px;
         text-align: center;
-        min-width: 130px;
+        min-width: 140px;
     }
     .price-title { font-size: 10px; color: #a0aec0; font-weight: bold; text-transform: uppercase; }
     .price-value { font-size: 16px; color: #00E6FF; font-weight: bold; margin-top: 2px; }
@@ -41,15 +44,22 @@ st.markdown("""
     .main-title { margin: 0; font-size: 22px; color: #ffffff; font-weight: bold; }
     .sub-title { margin: 4px 0 0 0; font-size: 13px; color: #a0aec0; }
     .slogan-box { font-size: 12px; color: #f6ad55; margin-top: 4px; font-weight: 500; }
+    
+    .live-clock {
+        color: #00E6FF;
+        font-weight: bold;
+        font-size: 13px;
+        margin-top: 3px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# Canlı Piyasa Verilerini Çekme (CoinGecko Public API - Engel Bulunmaz)
-@st.cache_data(ttl=10)
+# Canlı Piyasa Verilerini Çekme (Saniyelik Önbellek)
+@st.cache_data(ttl=1)
 def fetch_live_market_data():
     try:
         url = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=24h"
-        res = requests.get(url, timeout=5)
+        res = requests.get(url, timeout=3)
         if res.status_code == 200:
             return res.json()
     except Exception:
@@ -58,7 +68,10 @@ def fetch_live_market_data():
 
 raw_data = fetch_live_market_data()
 
-# BTC Fiyatları (Spot & Futures tahmini)
+# Her saniye anlık güncellenen canlı saat
+current_time_live = datetime.now().strftime("%H:%M:%S")
+
+# BTC Fiyatları
 btc_spot_str = "Yükleniyor..."
 btc_fut_str = "Yükleniyor..."
 
@@ -67,10 +80,9 @@ if raw_data:
     if btc_obj:
         btc_price = float(btc_obj.get('current_price', 0))
         btc_spot_str = f"${btc_price:,.2f}"
-        # Futures (Vadeli) piyasadaki çok küçük farkı yansıtma
         btc_fut_str = f"${(btc_price * 1.0002):,.2f}"
 
-# Header Tasarımı
+# Header Tasarımı (Saniyelik Canlı Saat İle)
 st.markdown(f"""
 <div class="header-container">
     <div class="price-box">
@@ -81,6 +93,7 @@ st.markdown(f"""
         <div class="main-title">Juno₿TWHunteR — Global Market Signal Feed 🌎₿</div>
         <div class="sub-title">₿ Bitcoin sets the direction.</div>
         <div class="slogan-box">Juno₿TWHunteR hunts the market. 🐋🌎</div>
+        <div class="live-clock">⏱️ ANLIK CANLI ZAMAN: {current_time_live}</div>
     </div>
     <div class="price-box">
         <div class="price-title">BTC/USDT PERPETUAL</div>
@@ -89,12 +102,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# Yenile Butonu
-if st.button("🔄 Verileri Anlık Yenile"):
-    st.rerun()
-
 if raw_data:
-    current_time = datetime.now().strftime("%H:%M:%S")
     top50_data = []
     binance_action = []
     mexc_action = []
@@ -106,7 +114,6 @@ if raw_data:
         change = float(item.get('price_change_percentage_24h', 0) or 0)
         vol = float(item.get('total_volume', 0)) / 1_000_000
 
-        # Canlı Teknik İndikatör Hesaplamaları
         rsi_approx = min(90, max(10, int(50 + change * 2.5)))
         e1_rsi = f"RSI: {rsi_approx}"
         
@@ -116,7 +123,6 @@ if raw_data:
         vol_status = "Yüksek Hacim 🐋" if vol > 500 else "Normal Hacim 📊"
         e3_vol = f"Vol: {vol_status}"
 
-        # Gerçek Sinyal Tipi
         if change >= 4.0:
             sig = "PUMP 🚀"
         elif change <= -4.0:
@@ -139,7 +145,7 @@ if raw_data:
             "Indicator 1": e1_rsi,
             "Indicator 2": e2_mom,
             "Indicator 3": e3_vol,
-            "Action Time": current_time
+            "Action Time": current_time_live
         })
 
         if idx < 8:
@@ -148,7 +154,7 @@ if raw_data:
                 "Pair": f"{symbol}/USDT",
                 "Price": f"${price:,.4f}" if price < 1 else f"${price:,.2f}",
                 "% U/D": f"{change:+.2f}%",
-                "Time": current_time
+                "Time": current_time_live
             })
         if 8 <= idx < 16:
             mexc_action.append({
@@ -156,7 +162,7 @@ if raw_data:
                 "Pair": f"{symbol}/USDT",
                 "Price": f"${price:,.4f}" if price < 1 else f"${price:,.2f}",
                 "% U/D": f"{change:+.2f}%",
-                "Time": current_time
+                "Time": current_time_live
             })
         if vol > 300 and len(whale_btc) < 8:
             whale_btc.append({
@@ -164,7 +170,7 @@ if raw_data:
                 "Pair": f"{symbol}/USDT",
                 "Price": f"${price:,.4f}" if price < 1 else f"${price:,.2f}",
                 "Whale Vol": f"${vol:.2f}M",
-                "Time": current_time
+                "Time": current_time_live
             })
 
     df_main = pd.DataFrame(top50_data)
