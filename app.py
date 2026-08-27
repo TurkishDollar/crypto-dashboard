@@ -1,12 +1,11 @@
 import streamlit as st
 import pandas as pd
 import requests
-import plotly.graph_objects as go
 from datetime import datetime, timezone
 
 # ============================================================
 # JUNO₿TWHUNTER
-# REAL BINANCE MARKET DATA
+# REAL BINANCE DATA ONLY
 # NO MOCK / NO DEMO DATA
 # ============================================================
 
@@ -29,14 +28,14 @@ session.headers.update({
 
 
 # ============================================================
-# CSS
+# STYLE
 # ============================================================
 
 st.markdown("""
 <style>
 
 .stApp {
-    background: #080b11;
+    background-color: #080b11;
     color: #e8edf5;
 }
 
@@ -47,9 +46,9 @@ st.markdown("""
 
 .title {
     text-align: center;
+    color: white;
     font-size: 30px;
     font-weight: 900;
-    color: white;
 }
 
 .subtitle {
@@ -59,25 +58,25 @@ st.markdown("""
     margin-bottom: 20px;
 }
 
-.card {
+.market-card {
     background: #111823;
-    border: 1px solid #253044;
+    border: 1px solid #263247;
     border-radius: 14px;
-    padding: 16px;
+    padding: 15px;
     text-align: center;
 }
 
-.card-title {
+.market-label {
     color: #8d98aa;
     font-size: 11px;
     font-weight: bold;
 }
 
-.card-value {
+.market-value {
     color: white;
-    font-size: 21px;
+    font-size: 20px;
     font-weight: 900;
-    margin-top: 6px;
+    margin-top: 5px;
 }
 
 .long-box {
@@ -85,11 +84,10 @@ st.markdown("""
     border: 3px solid #00e676;
     color: #00ff88;
     border-radius: 18px;
-    padding: 25px;
+    padding: 24px;
     text-align: center;
     font-size: 42px;
     font-weight: 900;
-    box-shadow: 0 0 30px rgba(0,230,118,0.18);
 }
 
 .short-box {
@@ -97,11 +95,10 @@ st.markdown("""
     border: 3px solid #ff304f;
     color: #ff304f;
     border-radius: 18px;
-    padding: 25px;
+    padding: 24px;
     text-align: center;
     font-size: 42px;
     font-weight: 900;
-    box-shadow: 0 0 30px rgba(255,48,79,0.18);
 }
 
 .wait-box {
@@ -109,7 +106,7 @@ st.markdown("""
     border: 3px solid #778196;
     color: #c0c6d0;
     border-radius: 18px;
-    padding: 25px;
+    padding: 24px;
     text-align: center;
     font-size: 42px;
     font-weight: 900;
@@ -119,7 +116,7 @@ st.markdown("""
     text-align: center;
     font-size: 22px;
     font-weight: 800;
-    margin-top: 10px;
+    margin: 10px 0 20px 0;
 }
 
 .reason {
@@ -130,22 +127,12 @@ st.markdown("""
     margin-bottom: 7px;
 }
 
-.online {
-    color: #00e676;
-    font-weight: bold;
-}
-
-.offline {
-    color: #ff304f;
-    font-weight: bold;
-}
-
 </style>
 """, unsafe_allow_html=True)
 
 
 # ============================================================
-# API FUNCTION
+# API REQUEST
 # ============================================================
 
 def api_get(url, params=None):
@@ -161,66 +148,57 @@ def api_get(url, params=None):
         if response.status_code != 200:
 
             return {
-                "error": True,
+                "ok": False,
                 "status": response.status_code,
-                "message": response.text,
-                "url": response.url
+                "message": response.text
             }
 
         return {
-            "error": False,
-            "data": response.json(),
-            "url": response.url
+            "ok": True,
+            "data": response.json()
         }
 
     except requests.exceptions.Timeout:
 
         return {
-            "error": True,
+            "ok": False,
             "status": "TIMEOUT",
-            "message": "Binance API zaman aşımına uğradı.",
-            "url": url
+            "message": "Binance API zaman aşımına uğradı."
         }
 
     except requests.exceptions.ConnectionError:
 
         return {
-            "error": True,
+            "ok": False,
             "status": "CONNECTION ERROR",
-            "message": "Binance API bağlantısı kurulamadı.",
-            "url": url
+            "message": "Binance API bağlantısı kurulamadı."
         }
 
     except Exception as e:
 
         return {
-            "error": True,
+            "ok": False,
             "status": "ERROR",
-            "message": str(e),
-            "url": url
+            "message": str(e)
         }
 
 
 # ============================================================
-# BINANCE CONNECTION TEST
+# API TEST
 # ============================================================
 
-def test_spot():
+def test_spot_api():
 
-    result = api_get(
+    return api_get(
         f"{SPOT_API}/api/v3/ping"
     )
 
-    return not result["error"], result
 
+def test_futures_api():
 
-def test_futures():
-
-    result = api_get(
+    return api_get(
         f"{FUTURES_API}/fapi/v1/ping"
     )
-
-    return not result["error"], result
 
 
 # ============================================================
@@ -234,13 +212,17 @@ def get_spot_price(symbol):
         {"symbol": symbol}
     )
 
-    if result["error"]:
+    if not result["ok"]:
         return None, result
 
     try:
-        return float(result["data"]["price"]), result
+
+        return float(
+            result["data"]["price"]
+        ), result
 
     except Exception:
+
         return None, result
 
 
@@ -255,13 +237,17 @@ def get_futures_price(symbol):
         {"symbol": symbol}
     )
 
-    if result["error"]:
+    if not result["ok"]:
         return None, result
 
     try:
-        return float(result["data"]["price"]), result
+
+        return float(
+            result["data"]["price"]
+        ), result
 
     except Exception:
+
         return None, result
 
 
@@ -276,7 +262,7 @@ def get_futures_24h(symbol):
         {"symbol": symbol}
     )
 
-    if result["error"]:
+    if not result["ok"]:
         return None, result
 
     try:
@@ -284,34 +270,48 @@ def get_futures_24h(symbol):
         data = result["data"]
 
         return {
-            "change": float(data["priceChangePercent"]),
-            "high": float(data["highPrice"]),
-            "low": float(data["lowPrice"]),
-            "volume": float(data["quoteVolume"]),
-            "trades": int(data["count"])
+            "change": float(
+                data["priceChangePercent"]
+            ),
+            "high": float(
+                data["highPrice"]
+            ),
+            "low": float(
+                data["lowPrice"]
+            ),
+            "volume": float(
+                data["quoteVolume"]
+            ),
+            "trades": int(
+                data["count"]
+            )
         }, result
 
-    except Exception:
+    except Exception as e:
 
-        return None, result
+        return None, {
+            "ok": False,
+            "status": "DATA ERROR",
+            "message": str(e)
+        }
 
 
 # ============================================================
-# FUTURES KLINES
+# KLINE DATA
 # ============================================================
 
-def get_klines(symbol, interval):
+def get_klines(symbol, timeframe):
 
     result = api_get(
         f"{FUTURES_API}/fapi/v1/klines",
         {
             "symbol": symbol,
-            "interval": interval,
+            "interval": timeframe,
             "limit": KLINE_LIMIT
         }
     )
 
-    if result["error"]:
+    if not result["ok"]:
         return None, result
 
     try:
@@ -338,7 +338,7 @@ def get_klines(symbol, interval):
             columns=columns
         )
 
-        numeric = [
+        numeric_columns = [
             "open",
             "high",
             "low",
@@ -350,7 +350,7 @@ def get_klines(symbol, interval):
             "taker_buy_quote"
         ]
 
-        for column in numeric:
+        for column in numeric_columns:
 
             df[column] = pd.to_numeric(
                 df[column],
@@ -367,7 +367,7 @@ def get_klines(symbol, interval):
     except Exception as e:
 
         return None, {
-            "error": True,
+            "ok": False,
             "status": "DATA ERROR",
             "message": str(e)
         }
@@ -381,20 +381,25 @@ def calculate_rsi(series, period=14):
 
     delta = series.diff()
 
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
+    gain = delta.clip(
+        lower=0
+    )
 
-    average_gain = gain.ewm(
+    loss = -delta.clip(
+        upper=0
+    )
+
+    avg_gain = gain.ewm(
         alpha=1 / period,
         adjust=False
     ).mean()
 
-    average_loss = loss.ewm(
+    avg_loss = loss.ewm(
         alpha=1 / period,
         adjust=False
     ).mean()
 
-    rs = average_gain / average_loss.replace(
+    rs = avg_gain / avg_loss.replace(
         0,
         float("nan")
     )
@@ -435,8 +440,7 @@ def calculate_indicators(df):
     ).mean()
 
     df["rsi"] = calculate_rsi(
-        df["close"],
-        14
+        df["close"]
     )
 
     typical_price = (
@@ -476,7 +480,8 @@ def generate_signal(df):
             "confidence": 0,
             "score": 0,
             "reasons": [
-                "200 mum tamamlanana kadar WAIT."
+                "Gerçek Binance verilerinden "
+                "200 mum bekleniyor."
             ]
         }
 
@@ -597,10 +602,11 @@ def generate_signal(df):
 
             if score > 0:
                 score += 1
+
             elif score < 0:
                 score -= 1
 
-    # Final
+    # FINAL
     if score >= 4:
 
         signal = "LONG"
@@ -615,22 +621,19 @@ def generate_signal(df):
 
     confidence = min(
         99,
-        int(
-            50 + abs(score) * 6
-        )
+        50 + abs(score) * 6
     )
 
     return {
         "signal": signal,
         "confidence": confidence,
         "score": score,
-        "rsi": rsi,
         "reasons": reasons
     }
 
 
 # ============================================================
-# PAGE TITLE
+# TITLE
 # ============================================================
 
 st.markdown(
@@ -657,7 +660,7 @@ with st.sidebar:
 
     symbol = st.text_input(
         "Coin",
-        "BTCUSDT"
+        value="BTCUSDT"
     ).upper().strip()
 
     timeframe = st.selectbox(
@@ -676,35 +679,35 @@ with st.sidebar:
     )
 
     whale_threshold = st.number_input(
-        "🐋 Whale Threshold USDT",
+        "🐋 Whale Threshold (USDT)",
         min_value=10000,
         max_value=10000000,
         value=100000,
         step=10000
     )
 
-    refresh = st.button(
-        "🔄 Verileri Yenile"
+    manual_refresh = st.button(
+        "🔄 Şimdi Yenile"
     )
 
-    if refresh:
-        st.cache_data.clear()
+    if manual_refresh:
+
         st.rerun()
 
 
 # ============================================================
-# API STATUS
+# BINANCE CONNECTION TEST
 # ============================================================
 
-spot_online, spot_test = test_spot()
+spot_test = test_spot_api()
 
-futures_online, futures_test = test_futures()
+futures_test = test_futures_api()
 
-status1, status2 = st.columns(2)
+s1, s2 = st.columns(2)
 
-with status1:
+with s1:
 
-    if spot_online:
+    if spot_test["ok"]:
 
         st.success(
             "🟢 BINANCE SPOT API: ONLINE"
@@ -717,12 +720,14 @@ with status1:
         )
 
         st.code(
-            str(spot_test)
+            f"Status: {spot_test['status']}\n"
+            f"Error: {spot_test['message']}"
         )
 
-with status2:
 
-    if futures_online:
+with s2:
+
+    if futures_test["ok"]:
 
         st.success(
             "🟢 BINANCE FUTURES API: ONLINE"
@@ -735,15 +740,16 @@ with status2:
         )
 
         st.code(
-            str(futures_test)
+            f"Status: {futures_test['status']}\n"
+            f"Error: {futures_test['message']}"
         )
 
 
 # ============================================================
-# STOP IF API OFFLINE
+# STOP IF BINANCE OFFLINE
 # ============================================================
 
-if not spot_online or not futures_online:
+if not spot_test["ok"] or not futures_test["ok"]:
 
     st.warning(
         "Gerçek Binance verisi alınamadığı için "
@@ -754,7 +760,7 @@ if not spot_online or not futures_online:
 
 
 # ============================================================
-# REAL DATA
+# GET REAL DATA
 # ============================================================
 
 spot_price, spot_result = get_spot_price(
@@ -776,13 +782,13 @@ df, kline_result = get_klines(
 
 
 # ============================================================
-# DATA ERROR
+# SYMBOL / DATA ERRORS
 # ============================================================
 
 if spot_price is None:
 
     st.error(
-        "❌ Spot fiyat alınamadı."
+        "❌ Binance Spot fiyatı alınamadı."
     )
 
     st.code(
@@ -795,7 +801,7 @@ if spot_price is None:
 if futures_price is None:
 
     st.error(
-        "❌ Futures fiyat alınamadı."
+        "❌ Binance Futures fiyatı alınamadı."
     )
 
     st.code(
@@ -805,10 +811,23 @@ if futures_price is None:
     st.stop()
 
 
+if stats is None:
+
+    st.error(
+        "❌ Binance Futures 24H verisi alınamadı."
+    )
+
+    st.code(
+        str(stats_result)
+    )
+
+    st.stop()
+
+
 if df is None:
 
     st.error(
-        "❌ Futures mum verisi alınamadı."
+        "❌ Binance Futures mum verisi alınamadı."
     )
 
     st.code(
@@ -819,7 +838,7 @@ if df is None:
 
 
 # ============================================================
-# INDICATORS
+# CALCULATE
 # ============================================================
 
 df = calculate_indicators(
@@ -837,17 +856,17 @@ last = df.iloc[-1]
 # MARKET CARDS
 # ============================================================
 
-c1, c2, c3, c4, c5 = st.columns(5)
+c1, c2, c3, c4 = st.columns(4)
 
 with c1:
 
     st.markdown(
         f"""
-        <div class="card">
-            <div class="card-title">
+        <div class="market-card">
+            <div class="market-label">
                 BINANCE SPOT
             </div>
-            <div class="card-value">
+            <div class="market-value">
                 ${spot_price:,.2f}
             </div>
         </div>
@@ -859,11 +878,11 @@ with c2:
 
     st.markdown(
         f"""
-        <div class="card">
-            <div class="card-title">
-                USDT-M PERPETUAL
+        <div class="market-card">
+            <div class="market-label">
+                BINANCE USDT-M PERPETUAL
             </div>
-            <div class="card-value">
+            <div class="market-value">
                 ${futures_price:,.2f}
             </div>
         </div>
@@ -875,11 +894,11 @@ with c3:
 
     st.markdown(
         f"""
-        <div class="card">
-            <div class="card-title">
+        <div class="market-card">
+            <div class="market-label">
                 24H CHANGE
             </div>
-            <div class="card-value">
+            <div class="market-value">
                 {stats["change"]:+.2f}%
             </div>
         </div>
@@ -891,28 +910,12 @@ with c4:
 
     st.markdown(
         f"""
-        <div class="card">
-            <div class="card-title">
-                24H HIGH
+        <div class="market-card">
+            <div class="market-label">
+                TIMEFRAME
             </div>
-            <div class="card-value">
-                ${stats["high"]:,.2f}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-with c5:
-
-    st.markdown(
-        f"""
-        <div class="card">
-            <div class="card-title">
-                24H LOW
-            </div>
-            <div class="card-value">
-                ${stats["low"]:,.2f}
+            <div class="market-value">
+                {timeframe.upper()}
             </div>
         </div>
         """,
@@ -924,11 +927,13 @@ st.write("")
 
 
 # ============================================================
-# SIGNAL
+# MAIN SIGNAL
 # ============================================================
 
 signal = signal_data["signal"]
+
 confidence = signal_data["confidence"]
+
 
 if signal == "LONG":
 
@@ -937,12 +942,14 @@ if signal == "LONG":
         <div class="long-box">
             🟢 LONG
         </div>
+
         <div class="confidence">
             GÜVEN: {confidence}%
         </div>
         """,
         unsafe_allow_html=True
     )
+
 
 elif signal == "SHORT":
 
@@ -951,12 +958,14 @@ elif signal == "SHORT":
         <div class="short-box">
             🔴 SHORT
         </div>
+
         <div class="confidence">
             GÜVEN: {confidence}%
         </div>
         """,
         unsafe_allow_html=True
     )
+
 
 else:
 
@@ -965,6 +974,7 @@ else:
         <div class="wait-box">
             ⚪ WAIT
         </div>
+
         <div class="confidence">
             GÜVEN: {confidence}%
         </div>
@@ -974,7 +984,7 @@ else:
 
 
 # ============================================================
-# INDICATORS
+# TECHNICAL DATA
 # ============================================================
 
 st.subheader("📊 Gerçek Teknik Veriler")
@@ -982,30 +992,35 @@ st.subheader("📊 Gerçek Teknik Veriler")
 i1, i2, i3, i4, i5 = st.columns(5)
 
 with i1:
+
     st.metric(
         "RSI 14",
         f"{last['rsi']:.2f}"
     )
 
 with i2:
+
     st.metric(
         "EMA 9",
         f"{last['ema9']:,.2f}"
     )
 
 with i3:
+
     st.metric(
         "EMA 21",
         f"{last['ema21']:,.2f}"
     )
 
 with i4:
+
     st.metric(
         "EMA 50",
         f"{last['ema50']:,.2f}"
     )
 
 with i5:
+
     st.metric(
         "EMA 200",
         f"{last['ema200']:,.2f}"
@@ -1015,12 +1030,14 @@ with i5:
 v1, v2, v3 = st.columns(3)
 
 with v1:
+
     st.metric(
         "VWAP",
         f"{last['vwap']:,.2f}"
     )
 
 with v2:
+
     st.metric(
         "Volume",
         f"{last['volume']:,.2f}"
@@ -1057,81 +1074,39 @@ for reason in signal_data["reasons"]:
 
 
 # ============================================================
-# CANDLESTICK CHART
+# REAL CANDLE DATA
 # ============================================================
 
 st.subheader(
-    f"📈 {symbol} — Binance Futures"
+    f"📈 {symbol} — {timeframe.upper()} Gerçek Binance Mumları"
 )
 
-fig = go.Figure()
+display_df = df[
+    [
+        "open_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume"
+    ]
+].copy()
 
-fig.add_trace(
-    go.Candlestick(
-        x=df["open_time"],
-        open=df["open"],
-        high=df["high"],
-        low=df["low"],
-        close=df["close"],
-        name="Price"
-    )
-)
+display_df = display_df.tail(100)
 
-fig.add_trace(
-    go.Scatter(
-        x=df["open_time"],
-        y=df["ema9"],
-        name="EMA 9",
-        mode="lines"
-    )
-)
+display_df.columns = [
+    "Zaman",
+    "Open",
+    "High",
+    "Low",
+    "Close",
+    "Volume"
+]
 
-fig.add_trace(
-    go.Scatter(
-        x=df["open_time"],
-        y=df["ema21"],
-        name="EMA 21",
-        mode="lines"
-    )
-)
-
-fig.add_trace(
-    go.Scatter(
-        x=df["open_time"],
-        y=df["ema50"],
-        name="EMA 50",
-        mode="lines"
-    )
-)
-
-fig.add_trace(
-    go.Scatter(
-        x=df["open_time"],
-        y=df["ema200"],
-        name="EMA 200",
-        mode="lines"
-    )
-)
-
-fig.add_trace(
-    go.Scatter(
-        x=df["open_time"],
-        y=df["vwap"],
-        name="VWAP",
-        mode="lines"
-    )
-)
-
-fig.update_layout(
-    height=600,
-    template="plotly_dark",
-    xaxis_rangeslider_visible=False,
-    dragmode="pan"
-)
-
-st.plotly_chart(
-    fig,
-    use_container_width=True
+st.dataframe(
+    display_df,
+    use_container_width=True,
+    hide_index=True
 )
 
 
@@ -1153,14 +1128,19 @@ agg_result = api_get(
 
 whales = []
 
-if not agg_result["error"]:
+if agg_result["ok"]:
 
     for trade in agg_result["data"]:
 
         try:
 
-            price = float(trade["p"])
-            quantity = float(trade["q"])
+            price = float(
+                trade["p"]
+            )
+
+            quantity = float(
+                trade["q"]
+            )
 
             value = price * quantity
 
@@ -1173,17 +1153,27 @@ if not agg_result["error"]:
                 )
 
                 whales.append({
+
                     "Yön": side,
-                    "Fiyat": price,
-                    "Miktar": quantity,
-                    "USDT": value,
-                    "UTC": datetime.fromtimestamp(
-                        trade["T"] / 1000,
-                        timezone.utc
-                    ).strftime("%H:%M:%S")
+
+                    "Fiyat": f"${price:,.2f}",
+
+                    "Miktar": f"{quantity:,.6f}",
+
+                    "İşlem Değeri":
+                        f"${value:,.0f}",
+
+                    "UTC":
+                        datetime.fromtimestamp(
+                            trade["T"] / 1000,
+                            timezone.utc
+                        ).strftime(
+                            "%H:%M:%S"
+                        )
                 })
 
         except Exception:
+
             continue
 
 
@@ -1208,29 +1198,77 @@ else:
 
 
 # ============================================================
+# MARKET SUMMARY
+# ============================================================
+
+st.subheader("📋 Piyasa Özeti")
+
+m1, m2, m3 = st.columns(3)
+
+with m1:
+
+    st.metric(
+        "24H High",
+        f"${stats['high']:,.2f}"
+    )
+
+with m2:
+
+    st.metric(
+        "24H Low",
+        f"${stats['low']:,.2f}"
+    )
+
+with m3:
+
+    st.metric(
+        "24H Trades",
+        f"{stats['trades']:,}"
+    )
+
+
+# ============================================================
 # DATA STATUS
 # ============================================================
 
-now = datetime.now(
+now_utc = datetime.now(
     timezone.utc
 )
 
-tr_time = now.strftime(
-    "%H:%M:%S"
+tr_hour = (
+    now_utc.hour + 3
+) % 24
+
+tr_time = (
+    f"{tr_hour:02d}:"
+    f"{now_utc.minute:02d}:"
+    f"{now_utc.second:02d}"
 )
 
 st.divider()
 
 st.markdown(
     f"""
-    <div style="text-align:center;color:#788396;">
+    <div style="
+        text-align:center;
+        color:#788396;
+        font-size:12px;
+    ">
+
         🟢 LIVE REAL DATA<br>
+
         Binance Spot: ONLINE<br>
         Binance Futures: ONLINE<br>
-        Last Update: {now.strftime("%Y-%m-%d %H:%M:%S UTC")}<br>
-        Türkiye Saati: {tr_time} UTC+3<br><br>
+
+        Last Update:
+        {now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")}<br>
+
+        Türkiye Saati:
+        {tr_time} UTC+3<br><br>
+
         MOCK DATA: DISABLED<br>
         DEMO DATA: DISABLED
+
     </div>
     """,
     unsafe_allow_html=True
