@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 
 # ============================================================
 # JUNO₿TWHUNTER
-# REAL BINANCE DATA ONLY
+# REAL MARKET DATA
+# BYBIT + OKX
 # NO MOCK / NO DEMO DATA
 # ============================================================
 
@@ -16,115 +17,117 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-SPOT_API = "https://api.binance.com"
-FUTURES_API = "https://fapi.binance.com"
+BYBIT_API = "https://api.bybit.com"
+OKX_API = "https://www.okx.com"
 
-KLINE_LIMIT = 250
+KLINE_LIMIT = 200
 
 session = requests.Session()
+
 session.headers.update({
-    "User-Agent": "JunoBTWHunteR/1.0"
+    "User-Agent": "JunoBTWHunteR/2.0"
 })
 
 
 # ============================================================
-# STYLE
+# CSS
 # ============================================================
 
 st.markdown("""
 <style>
 
 .stApp {
-    background-color: #080b11;
-    color: #e8edf5;
+    background:#080b11;
+    color:#e8edf5;
 }
 
 .block-container {
-    padding-top: 1rem;
-    padding-bottom: 2rem;
+    padding-top:1rem;
 }
 
 .title {
-    text-align: center;
-    color: white;
-    font-size: 30px;
-    font-weight: 900;
+    text-align:center;
+    font-size:32px;
+    font-weight:900;
+    color:#ffffff;
 }
 
 .subtitle {
-    text-align: center;
-    color: #8d98aa;
-    font-size: 13px;
-    margin-bottom: 20px;
+    text-align:center;
+    color:#8b97aa;
+    font-size:13px;
+    margin-bottom:20px;
 }
 
-.market-card {
-    background: #111823;
-    border: 1px solid #263247;
-    border-radius: 14px;
-    padding: 15px;
-    text-align: center;
+.card {
+    background:#111823;
+    border:1px solid #263247;
+    border-radius:14px;
+    padding:16px;
+    text-align:center;
 }
 
-.market-label {
-    color: #8d98aa;
-    font-size: 11px;
-    font-weight: bold;
+.label {
+    color:#8793a6;
+    font-size:11px;
+    font-weight:800;
 }
 
-.market-value {
-    color: white;
-    font-size: 20px;
-    font-weight: 900;
-    margin-top: 5px;
+.value {
+    color:#ffffff;
+    font-size:21px;
+    font-weight:900;
+    margin-top:5px;
 }
 
-.long-box {
-    background: rgba(0,230,118,0.10);
-    border: 3px solid #00e676;
-    color: #00ff88;
-    border-radius: 18px;
-    padding: 24px;
-    text-align: center;
-    font-size: 42px;
-    font-weight: 900;
+.long {
+    background:rgba(0,230,118,.10);
+    border:3px solid #00e676;
+    color:#00ff88;
+    border-radius:18px;
+    padding:24px;
+    text-align:center;
+    font-size:42px;
+    font-weight:900;
+    box-shadow:0 0 25px rgba(0,230,118,.15);
 }
 
-.short-box {
-    background: rgba(255,48,79,0.10);
-    border: 3px solid #ff304f;
-    color: #ff304f;
-    border-radius: 18px;
-    padding: 24px;
-    text-align: center;
-    font-size: 42px;
-    font-weight: 900;
+.short {
+    background:rgba(255,48,79,.10);
+    border:3px solid #ff304f;
+    color:#ff304f;
+    border-radius:18px;
+    padding:24px;
+    text-align:center;
+    font-size:42px;
+    font-weight:900;
+    box-shadow:0 0 25px rgba(255,48,79,.15);
 }
 
-.wait-box {
-    background: rgba(130,140,155,0.10);
-    border: 3px solid #778196;
-    color: #c0c6d0;
-    border-radius: 18px;
-    padding: 24px;
-    text-align: center;
-    font-size: 42px;
-    font-weight: 900;
+.wait {
+    background:rgba(130,140,155,.10);
+    border:3px solid #778196;
+    color:#c0c6d0;
+    border-radius:18px;
+    padding:24px;
+    text-align:center;
+    font-size:42px;
+    font-weight:900;
 }
 
 .confidence {
-    text-align: center;
-    font-size: 22px;
-    font-weight: 800;
-    margin: 10px 0 20px 0;
+    text-align:center;
+    font-size:22px;
+    font-weight:900;
+    margin:12px 0 20px;
 }
 
 .reason {
-    background: #111823;
-    border-left: 4px solid #344155;
-    border-radius: 6px;
-    padding: 10px;
-    margin-bottom: 7px;
+    background:#111823;
+    border-left:4px solid #344155;
+    border-radius:6px;
+    padding:10px;
+    margin-bottom:7px;
 }
 
 </style>
@@ -132,10 +135,10 @@ st.markdown("""
 
 
 # ============================================================
-# API REQUEST
+# GENERIC REQUEST
 # ============================================================
 
-def api_get(url, params=None):
+def get_json(url, params=None):
 
     try:
 
@@ -147,237 +150,287 @@ def api_get(url, params=None):
 
         if response.status_code != 200:
 
-            return {
-                "ok": False,
-                "status": response.status_code,
-                "message": response.text
-            }
+            return None
 
-        return {
-            "ok": True,
-            "data": response.json()
-        }
+        data = response.json()
 
-    except requests.exceptions.Timeout:
-
-        return {
-            "ok": False,
-            "status": "TIMEOUT",
-            "message": "Binance API zaman aşımına uğradı."
-        }
-
-    except requests.exceptions.ConnectionError:
-
-        return {
-            "ok": False,
-            "status": "CONNECTION ERROR",
-            "message": "Binance API bağlantısı kurulamadı."
-        }
-
-    except Exception as e:
-
-        return {
-            "ok": False,
-            "status": "ERROR",
-            "message": str(e)
-        }
-
-
-# ============================================================
-# API TEST
-# ============================================================
-
-def test_spot_api():
-
-    return api_get(
-        f"{SPOT_API}/api/v3/ping"
-    )
-
-
-def test_futures_api():
-
-    return api_get(
-        f"{FUTURES_API}/fapi/v1/ping"
-    )
-
-
-# ============================================================
-# SPOT PRICE
-# ============================================================
-
-def get_spot_price(symbol):
-
-    result = api_get(
-        f"{SPOT_API}/api/v3/ticker/price",
-        {"symbol": symbol}
-    )
-
-    if not result["ok"]:
-        return None, result
-
-    try:
-
-        return float(
-            result["data"]["price"]
-        ), result
+        return data
 
     except Exception:
 
-        return None, result
+        return None
 
 
 # ============================================================
-# FUTURES PRICE
+# BYBIT SERVER TEST
 # ============================================================
 
-def get_futures_price(symbol):
+def bybit_test():
 
-    result = api_get(
-        f"{FUTURES_API}/fapi/v1/ticker/price",
-        {"symbol": symbol}
+    data = get_json(
+        f"{BYBIT_API}/v5/market/time"
     )
 
-    if not result["ok"]:
-        return None, result
-
-    try:
-
-        return float(
-            result["data"]["price"]
-        ), result
-
-    except Exception:
-
-        return None, result
+    return data is not None
 
 
 # ============================================================
-# FUTURES 24H
+# OKX SERVER TEST
 # ============================================================
 
-def get_futures_24h(symbol):
+def okx_test():
 
-    result = api_get(
-        f"{FUTURES_API}/fapi/v1/ticker/24hr",
-        {"symbol": symbol}
+    data = get_json(
+        f"{OKX_API}/api/v5/public/time"
     )
 
-    if not result["ok"]:
-        return None, result
-
-    try:
-
-        data = result["data"]
-
-        return {
-            "change": float(
-                data["priceChangePercent"]
-            ),
-            "high": float(
-                data["highPrice"]
-            ),
-            "low": float(
-                data["lowPrice"]
-            ),
-            "volume": float(
-                data["quoteVolume"]
-            ),
-            "trades": int(
-                data["count"]
-            )
-        }, result
-
-    except Exception as e:
-
-        return None, {
-            "ok": False,
-            "status": "DATA ERROR",
-            "message": str(e)
-        }
+    return data is not None
 
 
 # ============================================================
-# KLINE DATA
+# BYBIT TICKER
 # ============================================================
 
-def get_klines(symbol, timeframe):
+def bybit_ticker(symbol):
 
-    result = api_get(
-        f"{FUTURES_API}/fapi/v1/klines",
+    data = get_json(
+        f"{BYBIT_API}/v5/market/tickers",
         {
+            "category": "linear",
+            "symbol": symbol
+        }
+    )
+
+    if not data:
+        return None
+
+    try:
+
+        item = data["result"]["list"][0]
+
+        return {
+            "price": float(item["lastPrice"]),
+            "change": float(item["price24hPcnt"]) * 100,
+            "high": float(item["highPrice24h"]),
+            "low": float(item["lowPrice24h"]),
+            "volume": float(item["turnover24h"]),
+            "open_interest": float(item["openInterest"])
+        }
+
+    except Exception:
+
+        return None
+
+
+# ============================================================
+# BYBIT KLINES
+# ============================================================
+
+def bybit_klines(symbol, interval):
+
+    interval_map = {
+        "1m": "1",
+        "3m": "3",
+        "5m": "5",
+        "15m": "15",
+        "30m": "30",
+        "1h": "60",
+        "4h": "240",
+        "1d": "D"
+    }
+
+    bybit_interval = interval_map[interval]
+
+    data = get_json(
+        f"{BYBIT_API}/v5/market/kline",
+        {
+            "category": "linear",
             "symbol": symbol,
-            "interval": timeframe,
+            "interval": bybit_interval,
             "limit": KLINE_LIMIT
         }
     )
 
-    if not result["ok"]:
-        return None, result
+    if not data:
+        return None
 
     try:
 
-        data = result["data"]
+        rows = data["result"]["list"]
 
-        columns = [
-            "open_time",
-            "open",
-            "high",
-            "low",
-            "close",
-            "volume",
-            "close_time",
-            "quote_volume",
-            "trades",
-            "taker_buy_base",
-            "taker_buy_quote",
-            "ignore"
-        ]
+        rows = list(reversed(rows))
 
         df = pd.DataFrame(
-            data,
-            columns=columns
+            rows,
+            columns=[
+                "time",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "turnover"
+            ]
         )
 
-        numeric_columns = [
-            "open",
-            "high",
-            "low",
-            "close",
-            "volume",
-            "quote_volume",
-            "trades",
-            "taker_buy_base",
-            "taker_buy_quote"
-        ]
-
-        for column in numeric_columns:
-
-            df[column] = pd.to_numeric(
-                df[column],
-                errors="coerce"
-            )
-
-        df["open_time"] = pd.to_datetime(
-            df["open_time"],
+        df["time"] = pd.to_datetime(
+            pd.to_numeric(df["time"]),
             unit="ms"
         )
 
-        return df, result
+        for col in [
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "turnover"
+        ]:
 
-    except Exception as e:
+            df[col] = pd.to_numeric(
+                df[col],
+                errors="coerce"
+            )
 
-        return None, {
-            "ok": False,
-            "status": "DATA ERROR",
-            "message": str(e)
+        return df
+
+    except Exception:
+
+        return None
+
+
+# ============================================================
+# OKX TICKER
+# ============================================================
+
+def okx_ticker(symbol):
+
+    inst_id = symbol.replace(
+        "USDT",
+        "-USDT-SWAP"
+    )
+
+    data = get_json(
+        f"{OKX_API}/api/v5/market/ticker",
+        {
+            "instId": inst_id
         }
+    )
+
+    if not data:
+        return None
+
+    try:
+
+        item = data["data"][0]
+
+        last = float(item["last"])
+        open24 = float(item["open24h"])
+
+        change = (
+            (last - open24)
+            / open24
+            * 100
+        )
+
+        return {
+            "price": last,
+            "change": change,
+            "high": float(item["high24h"]),
+            "low": float(item["low24h"]),
+            "volume": float(item["volCcy24h"])
+        }
+
+    except Exception:
+
+        return None
+
+
+# ============================================================
+# OKX KLINES
+# ============================================================
+
+def okx_klines(symbol, interval):
+
+    inst_id = symbol.replace(
+        "USDT",
+        "-USDT-SWAP"
+    )
+
+    bar_map = {
+        "1m": "1m",
+        "3m": "3m",
+        "5m": "5m",
+        "15m": "15m",
+        "30m": "30m",
+        "1h": "1H",
+        "4h": "4H",
+        "1d": "1D"
+    }
+
+    data = get_json(
+        f"{OKX_API}/api/v5/market/candles",
+        {
+            "instId": inst_id,
+            "bar": bar_map[interval],
+            "limit": str(KLINE_LIMIT)
+        }
+    )
+
+    if not data:
+        return None
+
+    try:
+
+        rows = list(
+            reversed(data["data"])
+        )
+
+        df = pd.DataFrame(
+            rows,
+            columns=[
+                "time",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "vol_ccy",
+                "vol_ccy_quote",
+                "confirm"
+            ]
+        )
+
+        df["time"] = pd.to_datetime(
+            pd.to_numeric(df["time"]),
+            unit="ms"
+        )
+
+        for col in [
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume"
+        ]:
+
+            df[col] = pd.to_numeric(
+                df[col],
+                errors="coerce"
+            )
+
+        return df
+
+    except Exception:
+
+        return None
 
 
 # ============================================================
 # RSI
 # ============================================================
 
-def calculate_rsi(series, period=14):
+def rsi(series, period=14):
 
     delta = series.diff()
 
@@ -404,872 +457,19 @@ def calculate_rsi(series, period=14):
         float("nan")
     )
 
-    rsi = 100 - (
+    result = 100 - (
         100 / (1 + rs)
     )
 
-    return rsi.fillna(50)
+    return result.fillna(50)
 
 
 # ============================================================
 # INDICATORS
 # ============================================================
 
-def calculate_indicators(df):
+def indicators(df):
 
     df = df.copy()
 
-    df["ema9"] = df["close"].ewm(
-        span=9,
-        adjust=False
-    ).mean()
-
-    df["ema21"] = df["close"].ewm(
-        span=21,
-        adjust=False
-    ).mean()
-
-    df["ema50"] = df["close"].ewm(
-        span=50,
-        adjust=False
-    ).mean()
-
-    df["ema200"] = df["close"].ewm(
-        span=200,
-        adjust=False
-    ).mean()
-
-    df["rsi"] = calculate_rsi(
-        df["close"]
-    )
-
-    typical_price = (
-        df["high"]
-        + df["low"]
-        + df["close"]
-    ) / 3
-
-    df["vwap"] = (
-        typical_price * df["volume"]
-    ).cumsum() / df["volume"].cumsum()
-
-    df["volume_ma20"] = (
-        df["volume"]
-        .rolling(20)
-        .mean()
-    )
-
-    df["volume_ratio"] = (
-        df["volume"]
-        / df["volume_ma20"]
-    )
-
-    return df
-
-
-# ============================================================
-# SIGNAL ENGINE
-# ============================================================
-
-def generate_signal(df):
-
-    if len(df) < 200:
-
-        return {
-            "signal": "WAIT",
-            "confidence": 0,
-            "score": 0,
-            "reasons": [
-                "Gerçek Binance verilerinden "
-                "200 mum bekleniyor."
-            ]
-        }
-
-    last = df.iloc[-1]
-
-    score = 0
-    reasons = []
-
-    # EMA 9 / 21
-    if last["ema9"] > last["ema21"]:
-
-        score += 2
-
-        reasons.append(
-            "EMA 9 > EMA 21 → LONG yönlü momentum"
-        )
-
-    else:
-
-        score -= 2
-
-        reasons.append(
-            "EMA 9 < EMA 21 → SHORT yönlü momentum"
-        )
-
-    # EMA 50
-    if last["close"] > last["ema50"]:
-
-        score += 1
-
-        reasons.append(
-            "Fiyat EMA 50 üzerinde"
-        )
-
-    else:
-
-        score -= 1
-
-        reasons.append(
-            "Fiyat EMA 50 altında"
-        )
-
-    # EMA 200
-    if last["close"] > last["ema200"]:
-
-        score += 2
-
-        reasons.append(
-            "Fiyat EMA 200 üzerinde → ana trend bullish"
-        )
-
-    else:
-
-        score -= 2
-
-        reasons.append(
-            "Fiyat EMA 200 altında → ana trend bearish"
-        )
-
-    # RSI
-    rsi = float(last["rsi"])
-
-    if 50 < rsi < 70:
-
-        score += 1
-
-        reasons.append(
-            f"RSI {rsi:.2f} → bullish momentum"
-        )
-
-    elif 30 < rsi < 50:
-
-        score -= 1
-
-        reasons.append(
-            f"RSI {rsi:.2f} → bearish momentum"
-        )
-
-    elif rsi >= 70:
-
-        reasons.append(
-            f"RSI {rsi:.2f} → aşırı alım"
-        )
-
-    else:
-
-        reasons.append(
-            f"RSI {rsi:.2f} → aşırı satım"
-        )
-
-    # VWAP
-    if last["close"] > last["vwap"]:
-
-        score += 1
-
-        reasons.append(
-            "Fiyat VWAP üzerinde"
-        )
-
-    else:
-
-        score -= 1
-
-        reasons.append(
-            "Fiyat VWAP altında"
-        )
-
-    # Volume
-    volume_ratio = last["volume_ratio"]
-
-    if pd.notna(volume_ratio):
-
-        reasons.append(
-            f"Hacim oranı: {volume_ratio:.2f}x"
-        )
-
-        if volume_ratio >= 1.5:
-
-            if score > 0:
-                score += 1
-
-            elif score < 0:
-                score -= 1
-
-    # FINAL
-    if score >= 4:
-
-        signal = "LONG"
-
-    elif score <= -4:
-
-        signal = "SHORT"
-
-    else:
-
-        signal = "WAIT"
-
-    confidence = min(
-        99,
-        50 + abs(score) * 6
-    )
-
-    return {
-        "signal": signal,
-        "confidence": confidence,
-        "score": score,
-        "reasons": reasons
-    }
-
-
-# ============================================================
-# TITLE
-# ============================================================
-
-st.markdown(
-    '<div class="title">Juno₿TWHunteR 🌎₿</div>',
-    unsafe_allow_html=True
-)
-
-st.markdown(
-    '<div class="subtitle">'
-    'REAL-TIME BINANCE MARKET INTELLIGENCE — '
-    'NO MOCK / NO DEMO DATA'
-    '</div>',
-    unsafe_allow_html=True
-)
-
-
-# ============================================================
-# SIDEBAR
-# ============================================================
-
-with st.sidebar:
-
-    st.header("⚙️ Market Settings")
-
-    symbol = st.text_input(
-        "Coin",
-        value="BTCUSDT"
-    ).upper().strip()
-
-    timeframe = st.selectbox(
-        "Timeframe",
-        [
-            "1m",
-            "3m",
-            "5m",
-            "15m",
-            "30m",
-            "1h",
-            "4h",
-            "1d"
-        ],
-        index=3
-    )
-
-    whale_threshold = st.number_input(
-        "🐋 Whale Threshold (USDT)",
-        min_value=10000,
-        max_value=10000000,
-        value=100000,
-        step=10000
-    )
-
-    manual_refresh = st.button(
-        "🔄 Şimdi Yenile"
-    )
-
-    if manual_refresh:
-
-        st.rerun()
-
-
-# ============================================================
-# BINANCE CONNECTION TEST
-# ============================================================
-
-spot_test = test_spot_api()
-
-futures_test = test_futures_api()
-
-s1, s2 = st.columns(2)
-
-with s1:
-
-    if spot_test["ok"]:
-
-        st.success(
-            "🟢 BINANCE SPOT API: ONLINE"
-        )
-
-    else:
-
-        st.error(
-            "🔴 BINANCE SPOT API: OFFLINE"
-        )
-
-        st.code(
-            f"Status: {spot_test['status']}\n"
-            f"Error: {spot_test['message']}"
-        )
-
-
-with s2:
-
-    if futures_test["ok"]:
-
-        st.success(
-            "🟢 BINANCE FUTURES API: ONLINE"
-        )
-
-    else:
-
-        st.error(
-            "🔴 BINANCE FUTURES API: OFFLINE"
-        )
-
-        st.code(
-            f"Status: {futures_test['status']}\n"
-            f"Error: {futures_test['message']}"
-        )
-
-
-# ============================================================
-# STOP IF BINANCE OFFLINE
-# ============================================================
-
-if not spot_test["ok"] or not futures_test["ok"]:
-
-    st.warning(
-        "Gerçek Binance verisi alınamadığı için "
-        "uygulama sahte veri göstermiyor."
-    )
-
-    st.stop()
-
-
-# ============================================================
-# GET REAL DATA
-# ============================================================
-
-spot_price, spot_result = get_spot_price(
-    symbol
-)
-
-futures_price, futures_result = get_futures_price(
-    symbol
-)
-
-stats, stats_result = get_futures_24h(
-    symbol
-)
-
-df, kline_result = get_klines(
-    symbol,
-    timeframe
-)
-
-
-# ============================================================
-# SYMBOL / DATA ERRORS
-# ============================================================
-
-if spot_price is None:
-
-    st.error(
-        "❌ Binance Spot fiyatı alınamadı."
-    )
-
-    st.code(
-        str(spot_result)
-    )
-
-    st.stop()
-
-
-if futures_price is None:
-
-    st.error(
-        "❌ Binance Futures fiyatı alınamadı."
-    )
-
-    st.code(
-        str(futures_result)
-    )
-
-    st.stop()
-
-
-if stats is None:
-
-    st.error(
-        "❌ Binance Futures 24H verisi alınamadı."
-    )
-
-    st.code(
-        str(stats_result)
-    )
-
-    st.stop()
-
-
-if df is None:
-
-    st.error(
-        "❌ Binance Futures mum verisi alınamadı."
-    )
-
-    st.code(
-        str(kline_result)
-    )
-
-    st.stop()
-
-
-# ============================================================
-# CALCULATE
-# ============================================================
-
-df = calculate_indicators(
-    df
-)
-
-signal_data = generate_signal(
-    df
-)
-
-last = df.iloc[-1]
-
-
-# ============================================================
-# MARKET CARDS
-# ============================================================
-
-c1, c2, c3, c4 = st.columns(4)
-
-with c1:
-
-    st.markdown(
-        f"""
-        <div class="market-card">
-            <div class="market-label">
-                BINANCE SPOT
-            </div>
-            <div class="market-value">
-                ${spot_price:,.2f}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-with c2:
-
-    st.markdown(
-        f"""
-        <div class="market-card">
-            <div class="market-label">
-                BINANCE USDT-M PERPETUAL
-            </div>
-            <div class="market-value">
-                ${futures_price:,.2f}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-with c3:
-
-    st.markdown(
-        f"""
-        <div class="market-card">
-            <div class="market-label">
-                24H CHANGE
-            </div>
-            <div class="market-value">
-                {stats["change"]:+.2f}%
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-with c4:
-
-    st.markdown(
-        f"""
-        <div class="market-card">
-            <div class="market-label">
-                TIMEFRAME
-            </div>
-            <div class="market-value">
-                {timeframe.upper()}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-st.write("")
-
-
-# ============================================================
-# MAIN SIGNAL
-# ============================================================
-
-signal = signal_data["signal"]
-
-confidence = signal_data["confidence"]
-
-
-if signal == "LONG":
-
-    st.markdown(
-        f"""
-        <div class="long-box">
-            🟢 LONG
-        </div>
-
-        <div class="confidence">
-            GÜVEN: {confidence}%
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-elif signal == "SHORT":
-
-    st.markdown(
-        f"""
-        <div class="short-box">
-            🔴 SHORT
-        </div>
-
-        <div class="confidence">
-            GÜVEN: {confidence}%
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-else:
-
-    st.markdown(
-        f"""
-        <div class="wait-box">
-            ⚪ WAIT
-        </div>
-
-        <div class="confidence">
-            GÜVEN: {confidence}%
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-# ============================================================
-# TECHNICAL DATA
-# ============================================================
-
-st.subheader("📊 Gerçek Teknik Veriler")
-
-i1, i2, i3, i4, i5 = st.columns(5)
-
-with i1:
-
-    st.metric(
-        "RSI 14",
-        f"{last['rsi']:.2f}"
-    )
-
-with i2:
-
-    st.metric(
-        "EMA 9",
-        f"{last['ema9']:,.2f}"
-    )
-
-with i3:
-
-    st.metric(
-        "EMA 21",
-        f"{last['ema21']:,.2f}"
-    )
-
-with i4:
-
-    st.metric(
-        "EMA 50",
-        f"{last['ema50']:,.2f}"
-    )
-
-with i5:
-
-    st.metric(
-        "EMA 200",
-        f"{last['ema200']:,.2f}"
-    )
-
-
-v1, v2, v3 = st.columns(3)
-
-with v1:
-
-    st.metric(
-        "VWAP",
-        f"{last['vwap']:,.2f}"
-    )
-
-with v2:
-
-    st.metric(
-        "Volume",
-        f"{last['volume']:,.2f}"
-    )
-
-with v3:
-
-    ratio = last["volume_ratio"]
-
-    st.metric(
-        "Volume Ratio",
-        f"{ratio:.2f}x"
-        if pd.notna(ratio)
-        else "N/A"
-    )
-
-
-# ============================================================
-# SIGNAL REASONS
-# ============================================================
-
-st.subheader("🧠 Sinyal Nedenleri")
-
-for reason in signal_data["reasons"]:
-
-    st.markdown(
-        f"""
-        <div class="reason">
-            {reason}
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-# ============================================================
-# REAL CANDLE DATA
-# ============================================================
-
-st.subheader(
-    f"📈 {symbol} — {timeframe.upper()} Gerçek Binance Mumları"
-)
-
-display_df = df[
-    [
-        "open_time",
-        "open",
-        "high",
-        "low",
-        "close",
-        "volume"
-    ]
-].copy()
-
-display_df = display_df.tail(100)
-
-display_df.columns = [
-    "Zaman",
-    "Open",
-    "High",
-    "Low",
-    "Close",
-    "Volume"
-]
-
-st.dataframe(
-    display_df,
-    use_container_width=True,
-    hide_index=True
-)
-
-
-# ============================================================
-# WHALE SCANNER
-# ============================================================
-
-st.subheader(
-    f"🐋 Whale Scanner — ≥ ${whale_threshold:,.0f}"
-)
-
-agg_result = api_get(
-    f"{FUTURES_API}/fapi/v1/aggTrades",
-    {
-        "symbol": symbol,
-        "limit": 1000
-    }
-)
-
-whales = []
-
-if agg_result["ok"]:
-
-    for trade in agg_result["data"]:
-
-        try:
-
-            price = float(
-                trade["p"]
-            )
-
-            quantity = float(
-                trade["q"]
-            )
-
-            value = price * quantity
-
-            if value >= whale_threshold:
-
-                side = (
-                    "SELL"
-                    if trade["m"]
-                    else "BUY"
-                )
-
-                whales.append({
-
-                    "Yön": side,
-
-                    "Fiyat": f"${price:,.2f}",
-
-                    "Miktar": f"{quantity:,.6f}",
-
-                    "İşlem Değeri":
-                        f"${value:,.0f}",
-
-                    "UTC":
-                        datetime.fromtimestamp(
-                            trade["T"] / 1000,
-                            timezone.utc
-                        ).strftime(
-                            "%H:%M:%S"
-                        )
-                })
-
-        except Exception:
-
-            continue
-
-
-if whales:
-
-    whale_df = pd.DataFrame(
-        whales
-    )
-
-    st.dataframe(
-        whale_df,
-        use_container_width=True,
-        hide_index=True
-    )
-
-else:
-
-    st.info(
-        "Son gerçek Binance işlemleri içinde "
-        "belirlenen whale eşiğini geçen işlem bulunamadı."
-    )
-
-
-# ============================================================
-# MARKET SUMMARY
-# ============================================================
-
-st.subheader("📋 Piyasa Özeti")
-
-m1, m2, m3 = st.columns(3)
-
-with m1:
-
-    st.metric(
-        "24H High",
-        f"${stats['high']:,.2f}"
-    )
-
-with m2:
-
-    st.metric(
-        "24H Low",
-        f"${stats['low']:,.2f}"
-    )
-
-with m3:
-
-    st.metric(
-        "24H Trades",
-        f"{stats['trades']:,}"
-    )
-
-
-# ============================================================
-# DATA STATUS
-# ============================================================
-
-now_utc = datetime.now(
-    timezone.utc
-)
-
-tr_hour = (
-    now_utc.hour + 3
-) % 24
-
-tr_time = (
-    f"{tr_hour:02d}:"
-    f"{now_utc.minute:02d}:"
-    f"{now_utc.second:02d}"
-)
-
-st.divider()
-
-st.markdown(
-    f"""
-    <div style="
-        text-align:center;
-        color:#788396;
-        font-size:12px;
-    ">
-
-        🟢 LIVE REAL DATA<br>
-
-        Binance Spot: ONLINE<br>
-        Binance Futures: ONLINE<br>
-
-        Last Update:
-        {now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")}<br>
-
-        Türkiye Saati:
-        {tr_time} UTC+3<br><br>
-
-        MOCK DATA: DISABLED<br>
-        DEMO DATA: DISABLED
-
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+    df["ema9"]
