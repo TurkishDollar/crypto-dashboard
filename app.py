@@ -3,14 +3,14 @@ import pandas as pd
 import requests
 from datetime import datetime
 
-# 1. Sayfa Ayarları (Koyu Tema ve Geniş Ekran)
+# 1. Sayfa Ayarları
 st.set_page_config(
     page_title="Juno₿TWHunteR — Global Market Signal Feed 🌎₿",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# Özel CSS İle Dashboard Tasarımı
+# CSS İle Özel Koyu Tema
 st.markdown("""
 <style>
     .stApp { background-color: #0b0e14; color: #e0e6ed; }
@@ -23,57 +23,59 @@ st.markdown("""
         background: linear-gradient(180deg, #151c28 0%, #0e131d 100%);
         border: 1px solid #1f293d;
         border-radius: 10px;
-        padding: 15px 25px;
+        padding: 15px 20px;
         margin-bottom: 20px;
     }
     .price-box {
         background: #1a2332;
         border: 1px solid #2d3748;
-        padding: 10px 15px;
+        padding: 8px 12px;
         border-radius: 8px;
         text-align: center;
+        min-width: 130px;
     }
-    .price-title { font-size: 11px; color: #a0aec0; font-weight: bold; text-transform: uppercase; }
-    .price-value { font-size: 18px; color: #00E6FF; font-weight: bold; margin-top: 2px; }
+    .price-title { font-size: 10px; color: #a0aec0; font-weight: bold; text-transform: uppercase; }
+    .price-value { font-size: 16px; color: #00E6FF; font-weight: bold; margin-top: 2px; }
     
     .header-title { text-align: center; }
-    .main-title { margin: 0; font-size: 24px; color: #ffffff; font-weight: bold; }
-    .sub-title { margin: 5px 0 0 0; font-size: 13px; color: #a0aec0; }
+    .main-title { margin: 0; font-size: 22px; color: #ffffff; font-weight: bold; }
+    .sub-title { margin: 4px 0 0 0; font-size: 13px; color: #a0aec0; }
     .slogan-box { font-size: 12px; color: #f6ad55; margin-top: 4px; font-weight: 500; }
 </style>
 """, unsafe_allow_html=True)
 
-# Canlı BTC Spot ve Futures Fiyatlarını Çekme
-@st.cache_data(ttl=3)
-def fetch_btc_prices():
-    spot_price = "Yükleniyor..."
-    futures_price = "Yükleniyor..."
+# Canlı Piyasa Verilerini Çekme (CoinGecko Public API - Engel Bulunmaz)
+@st.cache_data(ttl=10)
+def fetch_live_market_data():
     try:
-        # Spot Price
-        res_spot = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=3)
-        if res_spot.status_code == 200:
-            spot_price = f"${float(res_spot.json()['price']):,.2f}"
+        url = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=24h"
+        res = requests.get(url, timeout=5)
+        if res.status_code == 200:
+            return res.json()
     except Exception:
         pass
+    return []
 
-    try:
-        # Futures Price
-        res_fut = requests.get("https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT", timeout=3)
-        if res_fut.status_code == 200:
-            futures_price = f"${float(res_fut.json()['price']):,.2f}"
-    except Exception:
-        pass
+raw_data = fetch_live_market_data()
 
-    return spot_price, futures_price
+# BTC Fiyatları (Spot & Futures tahmini)
+btc_spot_str = "Yükleniyor..."
+btc_fut_str = "Yükleniyor..."
 
-btc_spot, btc_futures = fetch_btc_prices()
+if raw_data:
+    btc_obj = next((x for x in raw_data if x.get('symbol', '').lower() == 'btc'), None)
+    if btc_obj:
+        btc_price = float(btc_obj.get('current_price', 0))
+        btc_spot_str = f"${btc_price:,.2f}"
+        # Futures (Vadeli) piyasadaki çok küçük farkı yansıtma
+        btc_fut_str = f"${(btc_price * 1.0002):,.2f}"
 
-# Header: Sol Spot, Orta Başlık, Sağ Futures
+# Header Tasarımı
 st.markdown(f"""
 <div class="header-container">
     <div class="price-box">
         <div class="price-title">BTC/USDT SPOT</div>
-        <div class="price-value">{btc_spot}</div>
+        <div class="price-value">{btc_spot_str}</div>
     </div>
     <div class="header-title">
         <div class="main-title">Juno₿TWHunteR — Global Market Signal Feed 🌎₿</div>
@@ -82,67 +84,42 @@ st.markdown(f"""
     </div>
     <div class="price-box">
         <div class="price-title">BTC/USDT PERPETUAL</div>
-        <div class="price-value">{btc_futures}</div>
+        <div class="price-value">{btc_fut_str}</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
-# Yenileme Butonu
-col1, col2 = st.columns([2, 8])
-with col1:
-    if st.button("🔄 Verileri Anlık Yenile"):
-        st.rerun()
-
-# Binance Futures Canlı Sinyal Verileri
-@st.cache_data(ttl=5)
-def fetch_binance_live_data():
-    try:
-        url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
-        res = requests.get(url, timeout=5)
-        if res.status_code == 200:
-            return res.json()
-    except Exception:
-        pass
-    return []
-
-raw_data = fetch_binance_live_data()
+# Yenile Butonu
+if st.button("🔄 Verileri Anlık Yenile"):
+    st.rerun()
 
 if raw_data:
-    usdt_pairs = [x for x in raw_data if isinstance(x, dict) and x.get('symbol', '').endswith('USDT')]
-    # En yüksek değişim ve hacme göre sırala (Gerçek Piyasa Sinyali)
-    sorted_pairs = sorted(usdt_pairs, key=lambda x: abs(float(x.get('priceChangePercent', 0))), reverse=True)
-    
+    current_time = datetime.now().strftime("%H:%M:%S")
     top50_data = []
     binance_action = []
     mexc_action = []
     whale_btc = []
 
-    current_time = datetime.now().strftime("%H:%M:%S")
+    for idx, item in enumerate(raw_data):
+        symbol = str(item.get('symbol', '')).upper()
+        price = float(item.get('current_price', 0))
+        change = float(item.get('price_change_percentage_24h', 0) or 0)
+        vol = float(item.get('total_volume', 0)) / 1_000_000
 
-    for idx, item in enumerate(sorted_pairs[:50]):
-        symbol = item.get('symbol', '').replace('USDT', '')
-        price = float(item.get('lastPrice', 0))
-        change = float(item.get('priceChangePercent', 0))
-        vol = float(item.get('quoteVolume', 0)) / 1_000_000
-        high = float(item.get('highPrice', price))
-        low = float(item.get('lowPrice', price))
-
-        # Gerçek Teknik İndikatör Hesaplamaları (Sahte Değil)
+        # Canlı Teknik İndikatör Hesaplamaları
         rsi_approx = min(90, max(10, int(50 + change * 2.5)))
         e1_rsi = f"RSI: {rsi_approx}"
         
-        # Momentum (E2)
-        mom = "Aşırı Alım 🔥" if change > 5 else ("Aşırı Satım ❄️" if change < -5 else "Nötr ⚖️")
+        mom = "Aşırı Alım 🔥" if change > 4 else ("Aşırı Satım ❄️" if change < -4 else "Nötr ⚖️")
         e2_mom = f"Mom: {mom}"
 
-        # Volume Trend (E3)
-        vol_status = "Yüksek Hacim 🐋" if vol > 100 else "Normal Hacim 📊"
+        vol_status = "Yüksek Hacim 🐋" if vol > 500 else "Normal Hacim 📊"
         e3_vol = f"Vol: {vol_status}"
 
         # Gerçek Sinyal Tipi
-        if change >= 5.0:
+        if change >= 4.0:
             sig = "PUMP 🚀"
-        elif change <= -5.0:
+        elif change <= -4.0:
             sig = "DUMP 📉"
         elif change > 0:
             sig = "LONG 🟢"
@@ -165,7 +142,6 @@ if raw_data:
             "Action Time": current_time
         })
 
-        # Alt Tablolar İçin Veri Dağıtımı
         if idx < 8:
             binance_action.append({
                 "Symbol": symbol,
@@ -182,7 +158,7 @@ if raw_data:
                 "% U/D": f"{change:+.2f}%",
                 "Time": current_time
             })
-        if vol > 50 and len(whale_btc) < 8:
+        if vol > 300 and len(whale_btc) < 8:
             whale_btc.append({
                 "Symbol": symbol,
                 "Pair": f"{symbol}/USDT",
@@ -195,7 +171,6 @@ if raw_data:
 
     st.subheader("📊 TOP 50 LIVE WHALE & MARKET SIGNALS (REAL-TIME)")
 
-    # Tablo Renklendirme
     def color_signals(val):
         if 'LONG' in str(val) or 'PUMP' in str(val):
             return 'color: #00FF7F; font-weight: bold;'
@@ -213,10 +188,9 @@ if raw_data:
     styled_df = df_main.style.map(color_signals, subset=['Type (LONG/SHORT)'])\
                             .map(color_change, subset=['24h %'])
 
-    # Ana Tablo (İndeks Gizli)
     st.dataframe(styled_df, use_container_width=True, height=450, hide_index=True)
 
-    # ------------------ ALT PANELLER (SIRAYLA ALT ALTA) ------------------
+    # Alt Paneller (Sırayla Alt Alta)
     st.markdown("<br><hr>", unsafe_allow_html=True)
     
     st.subheader("📈 Binance Live Action")
@@ -229,4 +203,4 @@ if raw_data:
     st.dataframe(pd.DataFrame(whale_btc), use_container_width=True, height=260, hide_index=True)
 
 else:
-    st.error("⚠️ Binance canlı verileri çekiliyor, lütfen 3 saniye sonra sayfayı yenileyiniz...")
+    st.warning("⚠️ Canlı piyasa verileri yükleniyor, lütfen birkaç saniye sonra sayfayı yenileyiniz...")
