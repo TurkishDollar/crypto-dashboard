@@ -1,430 +1,1052 @@
-Juno₿TWHunteR uygulamasını tamamen düzelt ve profesyonel hale getir.
-
-ÖNEMLİ:
-Ben Python kodu bilmiyorum. Bana parça parça kod verme. Mevcut app.py dosyasının tamamını kendin düzenle ve çalışır TAM DOSYA olarak oluştur. Mevcut kodu tamamen değiştirmen gerekiyorsa değiştir. Ben sadece kopyala-yapıştır yapacağım.
-
-AMAÇ:
-Juno₿TWHunteR gerçek zamanlı kripto piyasa istihbarat uygulamasıdır.
-
-KESİNLİKLE:
-- MOCK DATA KULLANMA.
-- DEMO DATA KULLANMA.
-- RASTGELE ÜRETİLMİŞ FİYAT KULLANMA.
-- SAHTE SİNYAL ÜRETME.
-- Binance API kullanma; bulunduğum ortamda Binance API 451 restricted-location hatası veriyor.
-- Ana veri kaynağı OKX olsun.
-- Gerçek OKX public API ve OKX public WebSocket kullan.
-- API verisi alınamazsa sahte veri göstermek yerine açıkça OFFLINE/HATA göster.
-- Uygulama hiçbir durumda sahte veriyle çalışmaya devam etmesin.
-
-BAĞIMLILIKLAR:
-Gerekli paketleri otomatik olarak requirements.txt içine ekle:
-streamlit
-pandas
-requests
-websocket-client
-
-Eğer plotly kullanmıyorsan kesinlikle import etme.
-Eksik paket yüzünden ModuleNotFoundError oluşmasına izin verme.
-
-OKX VERİLERİ:
-Ana market:
-BTC-USDT-SWAP
-
-Kullanıcı sidebar üzerinden coin değiştirebilsin.
-Örnek:
-BTC
-ETH
-SOL
-XRP
-DOGE
+import json
+import threading
+import time
+from collections import deque
+from datetime import datetime, timezone
+
+import pandas as pd
+import requests
+import streamlit as st
+import websocket
+import plotly.graph_objects as go
+
+
+st.set_page_config(
+    page_title="Juno₿TWHunteR",
+    page_icon="₿",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+
+# ============================================================
+# CONFIG
+# ============================================================
+
+OKX_REST = "https://www.okx.com"
+OKX_WS = "wss://ws.okx.com:8443/ws/v5/public"
+
+REST_TIMEOUT = 10
+MAX_TRADES = 200
+
+
+# ============================================================
+# STYLE
+# ============================================================
+
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background: #05070b;
+        color: #f1f5f9;
+    }
+
+    .block-container {
+        padding-top: 1rem;
+        max-width: 1500px;
+    }
+
+    .title {
+        text-align: center;
+        font-size: 34px;
+        font-weight: 900;
+        color: white;
+    }
+
+    .subtitle {
+        text-align: center;
+        color: #8792a5;
+        font-size: 13px;
+        margin-bottom: 20px;
+    }
+
+    .card {
+        background: #101620;
+        border: 1px solid #263247;
+        border-radius: 14px;
+        padding: 16px;
+        text-align: center;
+        min-height: 90px;
+    }
+
+    .label {
+        color: #8b96a8;
+        font-size: 11px;
+        font-weight: 800;
+    }
+
+    .value {
+        color: white;
+        font-size: 22px;
+        font-weight: 900;
+        margin-top: 7px;
+    }
+
+    .long {
+        background: rgba(0, 230, 118, 0.12);
+        border: 2px solid #00e676;
+        color: #00ff88;
+        border-radius: 16px;
+        padding: 20px;
+        text-align: center;
+        font-size: 38px;
+        font-weight: 900;
+    }
+
+    .short {
+        background: rgba(255, 48, 79, 0.12);
+        border: 2px solid #ff304f;
+        color: #ff304f;
+        border-radius: 16px;
+        padding: 20px;
+        text-align: center;
+        font-size: 38px;
+        font-weight: 900;
+    }
+
+    .wait {
+        background: rgba(150, 160, 175, 0.10);
+        border: 2px solid #687386;
+        color: #c2c9d3;
+        border-radius: 16px;
+        padding: 20px;
+        text-align: center;
+        font-size: 38px;
+        font-weight: 900;
+    }
+
+    .reason {
+        background: #101620;
+        border-left: 4px solid #40506a;
+        padding: 10px 14px;
+        border-radius: 7px;
+        margin-bottom: 6px;
+    }
+
+    .green {
+        color: #00e676;
+        font-weight: 900;
+    }
+
+    .red {
+        color: #ff304f;
+        font-weight: 900;
+    }
+
+    .yellow {
+        color: #ffc107;
+        font-weight: 900;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+
+# ============================================================
+# TITLE
+# ============================================================
+
+st.markdown(
+    '<div class="title">Juno₿TWHunteR 🌎₿</div>',
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    '<div class="subtitle">'
+    'REAL-TIME OKX MARKET INTELLIGENCE — NO MOCK / NO DEMO'
+    '</div>',
+    unsafe_allow_html=True
+)
+
+
+# ============================================================
+# SIDEBAR
+# ============================================================
+
+st.sidebar.header("⚙️ Market Settings")
+
+coin = st.sidebar.text_input(
+    "Coin",
+    value="BTC"
+).upper().strip()
+
+if not coin:
+    coin = "BTC"
+
+timeframe = st.sidebar.selectbox(
+    "Timeframe",
+    [
+        "1m",
+        "3m",
+        "5m",
+        "15m",
+        "30m",
+        "1H",
+        "4H",
+        "1D"
+    ],
+    index=3
+)
+
+whale_threshold = st.sidebar.number_input(
+    "🐋 Whale Threshold (USDT)",
+    min_value=10000,
+    max_value=10000000,
+    value=100000,
+    step=10000
+)
+
+if st.sidebar.button("🔄 Şimdi Yenile"):
+    st.rerun()
+
+
+INST_ID = f"{coin}-USDT-SWAP"
+
+
+# ============================================================
+# OKX REST
+# ============================================================
+
+def okx_get(endpoint, params=None):
+
+    try:
+        response = requests.get(
+            OKX_REST + endpoint,
+            params=params,
+            timeout=REST_TIMEOUT,
+            headers={
+                "User-Agent": "JunoBTWHunteR/3.0"
+            }
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+
+        if data.get("code") != "0":
+            return None, str(data)
+
+        return data, None
+
+    except Exception as error:
+        return None, str(error)
+
+
+# ============================================================
+# REST TICKER
+# ============================================================
+
+def get_ticker():
+
+    data, error = okx_get(
+        "/api/v5/market/ticker",
+        {"instId": INST_ID}
+    )
+
+    if error:
+        return None, error
+
+    try:
+
+        item = data["data"][0]
+
+        price = float(item["last"])
+        open24 = float(item["open24h"])
+
+        change = 0
+
+        if open24 != 0:
+            change = (
+                (price - open24)
+                / open24
+                * 100
+            )
+
+        return {
+            "price": price,
+            "change": change,
+            "high": float(item["high24h"]),
+            "low": float(item["low24h"]),
+            "volume": float(item["vol24h"]),
+            "quote_volume": float(item["volCcy24h"])
+        }, None
+
+    except Exception as error:
+        return None, str(error)
+
+
+# ============================================================
+# OKX CANDLES
+# ============================================================
+
+def get_candles():
+
+    data, error = okx_get(
+        "/api/v5/market/candles",
+        {
+            "instId": INST_ID,
+            "bar": timeframe,
+            "limit": "200"
+        }
+    )
+
+    if error:
+        return None, error
+
+    try:
+
+        rows = data["data"]
+
+        rows.reverse()
+
+        df = pd.DataFrame(
+            rows,
+            columns=[
+                "timestamp",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "vol_ccy",
+                "vol_ccy_quote",
+                "confirm"
+            ]
+        )
+
+        df["timestamp"] = pd.to_datetime(
+            pd.to_numeric(
+                df["timestamp"]
+            ),
+            unit="ms",
+            utc=True
+        )
+
+        numeric_columns = [
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "vol_ccy",
+            "vol_ccy_quote"
+        ]
+
+        for column in numeric_columns:
+            df[column] = pd.to_numeric(
+                df[column],
+                errors="coerce"
+            )
+
+        return df, None
+
+    except Exception as error:
+        return None, str(error)
+
+
+# ============================================================
+# TECHNICAL ANALYSIS
+# ============================================================
+
+def calculate_indicators(df):
+
+    df = df.copy()
+
+    df["EMA9"] = (
+        df["close"]
+        .ewm(
+            span=9,
+            adjust=False
+        )
+        .mean()
+    )
+
+    df["EMA21"] = (
+        df["close"]
+        .ewm(
+            span=21,
+            adjust=False
+        )
+        .mean()
+    )
+
+    df["EMA50"] = (
+        df["close"]
+        .ewm(
+            span=50,
+            adjust=False
+        )
+        .mean()
+    )
+
+    df["EMA200"] = (
+        df["close"]
+        .ewm(
+            span=200,
+            adjust=False
+        )
+        .mean()
+    )
+
+    delta = df["close"].diff()
+
+    gain = delta.clip(
+        lower=0
+    )
+
+    loss = -delta.clip(
+        upper=0
+    )
+
+    avg_gain = gain.ewm(
+        alpha=1 / 14,
+        adjust=False
+    ).mean()
+
+    avg_loss = loss.ewm(
+        alpha=1 / 14,
+        adjust=False
+    ).mean()
+
+    rs = avg_gain / avg_loss.replace(
+        0,
+        pd.NA
+    )
+
+    df["RSI"] = (
+        100 -
+        (
+            100 /
+            (1 + rs)
+        )
+    )
+
+    df["RSI"] = df["RSI"].fillna(50)
+
+    typical_price = (
+        df["high"]
+        + df["low"]
+        + df["close"]
+    ) / 3
+
+    df["VWAP"] = (
+        typical_price * df["volume"]
+    ).cumsum() / df["volume"].cumsum()
+
+    df["VolumeMA20"] = (
+        df["volume"]
+        .rolling(20)
+        .mean()
+    )
+
+    df["VolumeRatio"] = (
+        df["volume"]
+        /
+        df["VolumeMA20"]
+    )
+
+    return df
+
+
+# ============================================================
+# WEBSOCKET ENGINE
+# ============================================================
+
+class OKXEngine:
+
+    def __init__(self, inst_id):
+
+        self.inst_id = inst_id
+
+        self.connected = False
+        self.error = None
+
+        self.price = None
+        self.bid = None
+        self.ask = None
+
+        self.bid_size = 0.0
+        self.ask_size = 0.0
+
+        self.buy_volume = 0.0
+        self.sell_volume = 0.0
+
+        self.trades = deque(
+            maxlen=MAX_TRADES
+        )
+
+        self.thread = None
+
+    def on_open(self, ws):
+
+        self.connected = True
+        self.error = None
+
+        subscribe = {
+            "op": "subscribe",
+            "args": [
+                {
+                    "channel": "tickers",
+                    "instId": self.inst_id
+                },
+                {
+                    "channel": "trades",
+                    "instId": self.inst_id
+                },
+                {
+                    "channel": "books5",
+                    "instId": self.inst_id
+                }
+            ]
+        }
+
+        ws.send(
+            json.dumps(subscribe)
+        )
+
+    def on_message(self, ws, message):
+
+        try:
+
+            msg = json.loads(message)
+
+            if msg.get("event") == "error":
+                self.error = str(msg)
+                return
+
+            channel = (
+                msg.get("arg", {})
+                .get("channel")
+            )
+
+            data = msg.get(
+                "data",
+                []
+            )
+
+            if not data:
+                return
+
+            # -------------------------------
+            # TICKER
+            # -------------------------------
+
+            if channel == "tickers":
+
+                item = data[0]
+
+                self.price = float(
+                    item["last"]
+                )
+
+                self.bid = float(
+                    item["bidPx"]
+                )
+
+                self.ask = float(
+                    item["askPx"]
+                )
+
+            # -------------------------------
+            # TRADES
+            # -------------------------------
+
+            elif channel == "trades":
+
+                for item in data:
+
+                    price = float(
+                        item["px"]
+                    )
+
+                    size = float(
+                        item["sz"]
+                    )
+
+                    side = item["side"]
+
+                    timestamp = int(
+                        item["ts"]
+                    )
+
+                    value = price * size
+
+                    if side == "buy":
+                        self.buy_volume += value
+                    elif side == "sell":
+                        self.sell_volume += value
+
+                    self.trades.appendleft(
+                        {
+                            "side": side.upper(),
+                            "price": price,
+                            "size": size,
+                            "value": value,
+                            "time": datetime.fromtimestamp(
+                                timestamp / 1000,
+                                timezone.utc
+                            ).strftime("%H:%M:%S")
+                        }
+                    )
+
+            # -------------------------------
+            # ORDER BOOK
+            # -------------------------------
+
+            elif channel == "books5":
+
+                item = data[0]
+
+                bids = item.get(
+                    "bids",
+                    []
+                )
+
+                asks = item.get(
+                    "asks",
+                    []
+                )
 
-Girilen coin otomatik olarak:
-COIN-USDT-SWAP
-formatına dönüştürülsün.
+                if bids:
 
-GERÇEK REST VERİLERİ:
-OKX public REST API üzerinden:
-- Son fiyat
-- 24H değişim
-- 24H high
-- 24H low
-- 24H volume
-- quote volume
-- mum verileri
+                    self.bid = float(
+                        bids[0][0]
+                    )
 
-alınsın.
+                    self.bid_size = sum(
+                        float(row[1])
+                        for row in bids
+                    )
 
-GERÇEK WEBSOCKET:
-OKX public WebSocket kullan.
+                if asks:
 
-Aşağıdaki kanalları mümkün olduğunca gerçek zamanlı kullan:
-- tickers
-- trades
-- books5
+                    self.ask = float(
+                        asks[0][0]
+                    )
 
-WebSocket bağlantısı:
-wss://ws.okx.com:8443/ws/v5/public
+                    self.ask_size = sum(
+                        float(row[1])
+                        for row in asks
+                    )
 
-WebSocket otomatik reconnect yapmalı.
-Bağlantı koparsa yeniden bağlanmalı.
-Bağlantı durumunu ekranda göster:
+        except Exception as error:
 
-🟢 OKX WEBSOCKET — LIVE
-🟡 OKX WEBSOCKET — RECONNECTING
-🔴 OKX WEBSOCKET — OFFLINE
+            self.error = str(error)
 
-REST API durumunu da göster:
+    def on_error(self, ws, error):
 
-🟢 OKX REST API — ONLINE
-🔴 OKX REST API — OFFLINE
+        self.connected = False
+        self.error = str(error)
 
-GERÇEK CANLI FİYAT:
-WebSocket ticker verisinden gerçek zamanlı fiyat göster.
+    def on_close(self, ws, code, message):
 
-Ekranda:
-💰 BTC/USDT PERPETUAL
-LIVE PRICE
+        self.connected = False
 
-göster.
+    def run(self):
 
-BID / ASK:
-Gerçek WebSocket order book verisinden:
-- Bid
-- Ask
-- Bid Size
-- Ask Size
-- Spread
-- Order Book Imbalance
+        while True:
 
-göster.
+            try:
 
-ORDER BOOK IMBALANCE:
-Gerçek bid ve ask miktarlarını kullan.
+                ws = websocket.WebSocketApp(
+                    OKX_WS,
+                    on_open=self.on_open,
+                    on_message=self.on_message,
+                    on_error=self.on_error,
+                    on_close=self.on_close
+                )
 
-Formül:
+                ws.run_forever(
+                    ping_interval=20,
+                    ping_timeout=10
+                )
 
-imbalance =
-(bid_size - ask_size) /
-(bid_size + ask_size) * 100
+            except Exception as error:
 
-Sonucu:
-+% değer = alıcı baskısı
--% değer = satıcı baskısı
+                self.connected = False
+                self.error = str(error)
 
-olarak göster.
+            time.sleep(3)
 
-GERÇEK ALIM/SATIM AKIŞI:
-OKX WebSocket trades kanalından gerçek işlemleri al.
+    def start(self):
 
-Her işlem için:
-- BUY veya SELL
-- fiyat
-- miktar
-- işlem değeri
-- UTC saat
+        if self.thread is not None:
+            return
 
-göster.
+        self.thread = threading.Thread(
+            target=self.run,
+            daemon=True
+        )
 
-BUY işlemlerini ekranda belirgin YEŞİL göster.
-SELL işlemlerini belirgin KIRMIZI göster.
+        self.thread.start()
 
-FLOW:
-Gerçek WebSocket işlemlerinden:
-BUY FLOW
-SELL FLOW
 
-hesapla.
+# ============================================================
+# WEBSOCKET RESOURCE
+# ============================================================
 
-Flow imbalance:
+@st.cache_resource
+def create_engine(inst_id):
 
-(buy_volume - sell_volume) /
-(buy_volume + sell_volume) * 100
+    engine = OKXEngine(
+        inst_id
+    )
 
-olarak hesaplanmalı.
+    engine.start()
 
-WHALE SCANNER:
-Gerçek trades verisini kullan.
+    return engine
 
-Sidebar'da:
-🐋 Whale Threshold (USDT)
 
-ayarını oluştur.
+engine = create_engine(
+    INST_ID
+)
 
-Varsayılan:
-100000 USDT
 
-Kullanıcı değiştirebilsin.
+# ============================================================
+# GET REAL DATA
+# ============================================================
 
-İşlem değeri threshold'dan büyük/eşitse whale olarak göster.
+ticker, ticker_error = get_ticker()
 
-BUY whale:
-🟢 BUY WHALE
+candles, candle_error = get_candles()
 
-SELL whale:
-🔴 SELL WHALE
 
-göster.
+# ============================================================
+# DATA ERROR
+# ============================================================
 
-Kesinlikle sahte whale üretme.
+if ticker is None or candles is None:
 
-TEKNİK ANALİZ:
-Gerçek OKX mumlarından hesapla:
+    st.error(
+        "❌ Gerçek OKX piyasa verisi alınamadı."
+    )
 
-EMA 9
-EMA 21
-EMA 50
-EMA 200
-RSI 14
-VWAP
-Volume
-Volume MA20
-Volume Ratio
+    if ticker_error:
+        st.code(
+            "Ticker API:\n" +
+            str(ticker_error)
+        )
 
-Bunların tamamı gerçek mum verisinden hesaplanmalı.
+    if candle_error:
+        st.code(
+            "Candle API:\n" +
+            str(candle_error)
+        )
 
-SİNYAL MOTORU:
-Juno₿TWHunteR şu üç sonuçtan yalnızca birini üretsin:
+    st.warning(
+        "Sistem sahte veya demo veri göstermiyor."
+    )
 
-🟢 LONG
-🔴 SHORT
-⚪ WAIT
+    st.stop()
 
-Sinyal motoru aşağıdaki gerçek verileri birlikte değerlendirsin:
 
-1. EMA 9 / EMA 21
-2. EMA 50
-3. EMA 200
-4. RSI
-5. VWAP
-6. Volume Ratio
-7. Order Book Imbalance
-8. BUY/SELL Flow Imbalance
-9. Whale BUY/SELL aktivitesi
+# ============================================================
+# INDICATORS
+# ============================================================
 
-ÖNEMLİ:
-Sadece tek bir indikatöre bakarak LONG veya SHORT verme.
+candles = calculate_indicators(
+    candles
+)
 
-Çelişkili piyasa koşullarında WAIT üret.
+last = candles.iloc[-1]
 
-Örneğin:
-EMA bullish ama order flow güçlü bearish ise körü körüne LONG verme.
 
-SİNYAL GÜCÜ:
-Eski sistemdeki yapay "%92 güven" mantığını kullanma.
+# ============================================================
+# LIVE PRICE
+# ============================================================
 
-Bunun yerine:
-Sinyal Gücü: 0–100
+live_price = engine.price
 
-puanı oluştur.
+if live_price is None:
+    live_price = ticker["price"]
 
-Bu değer kesinlikle "işlemin kazanma ihtimali %92" gibi gösterilmesin.
 
-Başlığını:
-🎯 SİNYAL GÜCÜ
+# ============================================================
+# ORDER BOOK IMBALANCE
+# ============================================================
 
-olarak göster.
+book_total = (
+    engine.bid_size
+    +
+    engine.ask_size
+)
 
-LONG:
-Yeşil arka plan
-Yeşil yazı
-Belirgin büyük LONG kutusu
+if book_total > 0:
 
-SHORT:
-Kırmızı arka plan
-Kırmızı yazı
-Belirgin büyük SHORT kutusu
+    book_imbalance = (
+        engine.bid_size
+        -
+        engine.ask_size
+    ) / book_total * 100
 
-WAIT:
-Gri/sarı ton
-Belirgin WAIT kutusu
+else:
 
-Kullanıcı ekrana baktığında LONG ve SHORT ilk bakışta net şekilde ayırt edilebilmeli.
+    book_imbalance = 0.0
 
-SİNYAL NEDENLERİ:
-Sinyalin neden üretildiğini Türkçe olarak göster.
 
-Örnek:
+# ============================================================
+# FLOW IMBALANCE
+# ============================================================
 
-EMA 9 > EMA 21 → kısa vadeli bullish
-Fiyat EMA 200 üzerinde → ana trend bullish
-RSI 56 → bullish momentum
-Order Book → alıcı baskısı
-Flow → BUY baskısı
-Whale Activity → BUY
+flow_total = (
+    engine.buy_volume
+    +
+    engine.sell_volume
+)
 
-Ancak yalnızca gerçek verilerden gelen nedenleri göster.
+if flow_total > 0:
 
-GRAFİK:
-Mevcut basit line chart yerine mümkün olduğunca profesyonel bir gerçek mum grafiği oluştur.
+    flow_imbalance = (
+        engine.buy_volume
+        -
+        engine.sell_volume
+    ) / flow_total * 100
 
-Plotly kullanacaksan requirements.txt içine:
-plotly
+else:
 
-ekle.
+    flow_imbalance = 0.0
 
-Eğer Plotly kullanmıyorsan import plotly yapma.
 
-Grafikte:
-- Candlestick
-- EMA 9
-- EMA 21
-- EMA 50
-- EMA 200
-- mümkünse VWAP
+# ============================================================
+# SIGNAL ENGINE
+# ============================================================
 
-göster.
+score = 0
+reasons = []
 
-Grafik:
-- zoom
-- pan
-- mouse hover
-- timeframe değişimi
 
-desteklesin.
+# EMA 9 / 21
 
-TIMEFRAME:
-Sidebar'da:
+if last["EMA9"] > last["EMA21"]:
 
-1m
-3m
-5m
-15m
-30m
-1H
-4H
-1D
+    score += 2
 
-seçenekleri olsun.
+    reasons.append(
+        "EMA 9 > EMA 21 → kısa vadeli yükseliş"
+    )
 
-OKX'in desteklediği uygun bar değerlerini kullan.
+else:
 
-EKRAN TASARIMI:
-Tamamen koyu profesyonel terminal görünümü oluştur.
+    score -= 2
 
-Başlık:
+    reasons.append(
+        "EMA 9 < EMA 21 → kısa vadeli düşüş"
+    )
 
-Juno₿TWHunteR 🌎₿
 
-Alt başlık:
+# EMA 50
 
-REAL-TIME OKX MARKET INTELLIGENCE
+if last["close"] > last["EMA50"]:
 
-Üst bölümde:
-- LIVE PRICE
-- 24H CHANGE
-- 24H HIGH
-- 24H LOW
+    score += 1
 
-göster.
+    reasons.append(
+        "Fiyat EMA 50 üzerinde"
+    )
 
-Sonra:
+else:
 
-🌐 DATA CONNECTION
-💰 MARKET
-📚 ORDER BOOK
-⚡ REAL BUY/SELL FLOW
-🐋 WHALE SCANNER
-🎯 JUNO₿TWHUNTER SIGNAL
-📈 TECHNICAL ANALYSIS
-🧠 SIGNAL REASONS
-📊 REAL-TIME CHART
-⚡ LIVE TRADES
+    score -= 1
 
-bölümleri olsun.
+    reasons.append(
+        "Fiyat EMA 50 altında"
+    )
 
-VERİ DURUMU:
-Ekranın altında:
 
-🟢 OKX REAL DATA
-🟢 WEBSOCKET LIVE
-❌ MOCK DATA
-❌ DEMO DATA
+# EMA 200
 
-göster.
+if last["close"] > last["EMA200"]:
 
-Son güncelleme UTC saatini göster.
+    score += 2
 
-HATA YÖNETİMİ:
-Kodda hiçbir yerde boş veya bozuk try/except yapısı bırakma.
+    reasons.append(
+        "Fiyat EMA 200 üzerinde"
+    )
 
-SyntaxError oluşturma.
+else:
 
-Özellikle:
-try:
-    ...
-except:
-    ...
+    score -= 2
 
-bloklarının eksik kalmadığından emin ol.
+    reasons.append(
+        "Fiyat EMA 200 altında"
+    )
 
-Her fonksiyon düzgün kapanmalı.
 
-Tüm parantezleri, girintileri ve Python syntax'ını kontrol et.
+# RSI
 
-Uygulama başlatıldığında siyah boş ekran oluşmasın.
+rsi = float(
+    last["RSI"]
+)
 
-API başarısızsa kullanıcıya anlaşılır hata mesajı göster.
+if 50 < rsi < 70:
 
-API'den veri gelmiyorsa:
-"Gerçek piyasa verisi alınamadı. Sahte veri gösterilmiyor."
-mesajını göster.
+    score += 1
 
-AUTO REFRESH:
-WebSocket canlı akışı kullanıldığı için gereksiz yere her 1-2 saniyede tüm REST API'yi tekrar çağırma.
+    reasons.append(
+        f"RSI {rsi:.2f} → bullish momentum"
+    )
 
-REST verilerini makul aralıklarla yenile.
+elif 30 < rsi < 50:
 
-WebSocket gerçek zamanlı veriyi mümkün olduğunca sürekli kullansın.
+    score -= 1
 
-Streamlit üzerinde stabil çalışması için gerekiyorsa kontrollü ekran yenileme kullan.
+    reasons.append(
+        f"RSI {rsi:.2f} → bearish momentum"
+    )
 
-ÖNEMLİ:
-Streamlit Cloud ortamında çalışacak şekilde tasarla.
+elif rsi >= 70:
 
-Thread/WebSocket kullanımını Streamlit ile uyumlu ve güvenli yap.
+    reasons.append(
+        f"RSI {rsi:.2f} → aşırı alım"
+    )
 
-WebSocket thread'i uygulamayı kilitlemesin.
+else:
 
-Bağlantı koparsa uygulama çökmemeli.
+    reasons.append(
+        f"RSI {rsi:.2f} → aşırı satım"
+    )
 
-WebSocket yeniden bağlanabilmeli.
 
-SON KONTROL:
-Kod tamamlandıktan sonra kendi içinde kontrol et:
+# VWAP
 
-1. SyntaxError var mı?
-2. Eksik import var mı?
-3. requirements.txt eksik mi?
-4. plotly import ediliyor ama requirements.txt'de yok mu?
-5. Binance API yanlışlıkla kullanılıyor mu?
-6. Mock/demo veri var mı?
-7. Sahte fiyat üreten kod var mı?
-8. Sahte whale var mı?
-9. Sahte sinyal var mı?
-10. OKX REST çalışıyor mu?
-11. OKX WebSocket doğru endpoint'i kullanıyor mu?
-12. LONG yeşil mi?
-13. SHORT kırmızı mı?
-14. WAIT belirgin mi?
-15. Gerçek BUY/SELL trades gösteriliyor mu?
-16. Gerçek order book gösteriliyor mu?
-17. Whale scanner gerçek trades kullanıyor mu?
-18. Teknik indikatörler gerçek mumlardan mı hesaplanıyor?
-19. Uygulama veri alınamadığında sahte veri göstermiyor mu?
-20. Streamlit Cloud üzerinde çalışabilecek durumda mı?
+if last["close"] > last["VWAP"]:
 
-Bütün bunları düzelttikten sonra bana sadece tamamlanmış, çalışır proje dosyalarını oluştur.
+    score += 1
 
-BEN KOD BİLMİYORUM.
-BU NEDENLE PARÇA PARÇA TALİMAT VERME.
-MEVCUT KODU TAMAMEN DÜZELT.
-app.py VE GEREKLİ requirements.txt DOSYASINI HAZIRLA.
+    reasons.append(
+        "Fiyat VWAP üzerinde"
+    )
 
-AMAÇ:
-Önce çalışan ve stabil gerçek OKX REST + WebSocket sistemi oluştur.
-Daha sonra bu temel üzerine daha gelişmiş AI/sinyal motoru ekleyeceğiz.
+else:
 
-KESİNLİKLE GERÇEK VERİ.
-KESİNLİKLE MOCK YOK.
-KESİNLİKLE DEMO YOK.
+    score -= 1
+
+    reasons.append(
+        "Fiyat VWAP altında"
+    )
+
+
+# Volume
+
+volume_ratio = last["VolumeRatio"]
+
+if pd.notna(volume_ratio):
+
+    if volume_ratio >= 1.5:
+
+        if score > 0:
+            score += 1
+
+        elif score < 0:
+            score -= 1
+
+        reasons.append(
+            f"Hacim güçlü → {volume_ratio:.2f}x"
+        )
+
+    else:
+
+        reasons.append(
+            f"Hacim normal → {volume_ratio:.2f}x"
+        )
+
+
+# Order book
+
+if book_imbalance > 10:
+
+    score += 2
+
+    reasons.append(
+        f"Order Book → alıcı baskısı "
+        f"{book_imbalance:+.2f}%"
+    )
+
+elif book_imbalance < -10:
+
+    score -= 2
+
+    reasons.append(
+        f"Order Book → satıcı baskısı "
+        f"{book_imbalance:+.2f}%"
+    )
+
+else:
+
+    reasons.append(
+        f"Order Book → dengeli "
+        f"{book_imbalance:+.2f}%"
+    )
+
+
+# Real trade flow
+
+if flow_imbalance > 15:
+
+    score += 2
+
+    reasons.append(
+        f"Gerçek işlem akışı → BUY "
+        f"{flow_imbalance:+.2f}%"
+    )
+
+elif flow_imbalance < -15:
+
+    score -= 2
+
+    reasons.append(
+        f"Gerçek işlem akışı → SELL "
+        f"{flow_imbalance:+.2f}%"
+    )
+
+else:
+
+    reasons.append(
+        f"Gerçek işlem akışı → dengeli "
+        f"{flow_imbalance:+.2f}%"
+    )
+
+
+# ============================================================
+# FINAL SIGNAL
+# ============================================================
+
+if score >= 5:
+
+    signal = "LONG"
+
+elif score <= -5:
+
+    signal = "SHORT"
+
+else:
+
+    signal = "WAIT"
+
+
+signal_strength = min(
+    100,
+    int(
+        abs(score) / 12 * 100
+    )
+)
+
+
+# ============================================================
+# CONNECTION STATUS
+# ============================================================
+
+st.subheader(
+    "🌐 Gerçek Veri Kaynakları"
+)
+
+s1, s2 = st.columns(2)
+
+with s1:
+
+    if engine.connected:
+
+        st.markdown(
+            '<span class="
