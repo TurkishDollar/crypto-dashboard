@@ -1,1147 +1,344 @@
-import streamlit as st
-import pandas as pd
-import requests
-import time
-from datetime import datetime, timezone
-
-# ============================================================
-# JUNO₿TWHUNTER — REAL MARKET SIGNAL ENGINE
-# REAL BINANCE DATA ONLY — NO MOCK / NO DEMO DATA
-# ============================================================
-
-st.set_page_config(
-    page_title="Juno₿TWHunteR — Real Market Intelligence",
-    page_icon="₿",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
-
-# ============================================================
-# CONFIG
-# ============================================================
-
-SPOT_API = "https://api.binance.com"
-FUTURES_API = "https://fapi.binance.com"
-
-REFRESH_SECONDS = 5
-KLINE_LIMIT = 250
-
-# Büyük işlem eşiği
-WHALE_USDT_THRESHOLD = 100000
-
-# ============================================================
-# STYLE
-# ============================================================
-
-st.markdown("""
-<style>
-
-.stApp {
-    background: #080b11;
-    color: #e8edf5;
-}
-
-.block-container {
-    padding-top: 1rem;
-    padding-bottom: 2rem;
-}
-
-.main-title {
-    text-align: center;
-    font-size: 28px;
-    font-weight: 900;
-    color: #ffffff;
-    margin-bottom: 2px;
-}
-
-.sub-title {
-    text-align: center;
-    color: #8f9bad;
-    font-size: 13px;
-    margin-bottom: 20px;
-}
-
-.market-card {
-    background: linear-gradient(145deg,#121925,#0d131d);
-    border: 1px solid #202b3c;
-    border-radius: 14px;
-    padding: 16px;
-    text-align: center;
-}
-
-.market-label {
-    color: #8793a6;
-    font-size: 11px;
-    font-weight: 700;
-}
-
-.market-value {
-    color: #ffffff;
-    font-size: 21px;
-    font-weight: 900;
-    margin-top: 5px;
-}
-
-.signal-long {
-    background: rgba(0,220,120,0.12);
-    border: 2px solid #00e676;
-    color: #00ff88;
-    border-radius: 16px;
-    padding: 22px;
-    text-align: center;
-    font-size: 38px;
-    font-weight: 1000;
-    box-shadow: 0 0 25px rgba(0,230,118,0.18);
-}
-
-.signal-short {
-    background: rgba(255,45,70,0.12);
-    border: 2px solid #ff304f;
-    color: #ff304f;
-    border-radius: 16px;
-    padding: 22px;
-    text-align: center;
-    font-size: 38px;
-    font-weight: 1000;
-    box-shadow: 0 0 25px rgba(255,48,79,0.18);
-}
-
-.signal-wait {
-    background: rgba(150,160,175,0.10);
-    border: 2px solid #778196;
-    color: #b8c0cc;
-    border-radius: 16px;
-    padding: 22px;
-    text-align: center;
-    font-size: 38px;
-    font-weight: 1000;
-}
-
-.confidence {
-    text-align: center;
-    font-size: 22px;
-    font-weight: 800;
-    margin-top: 10px;
-}
-
-.reason {
-    background: #101722;
-    border-left: 4px solid #344155;
-    padding: 10px 14px;
-    border-radius: 6px;
-    margin-bottom: 7px;
-}
-
-.real-data {
-    color: #00e676;
-    font-weight: 800;
-}
-
-.warning-data {
-    color: #ffb300;
-    font-weight: 800;
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-# ============================================================
-# HTTP SESSION
-# ============================================================
-
-session = requests.Session()
-
-session.headers.update({
-    "User-Agent": "JunoBTWHunteR/1.0"
-})
-
-
-# ============================================================
-# GENERIC REQUEST
-# ============================================================
-
-def api_get(url, params=None):
-
-    try:
-
-        response = session.get(
-            url,
-            params=params,
-            timeout=8
-        )
-
-        response.raise_for_status()
-
-        return response.json()
-
-    except Exception as e:
-
-        return None
-
-
-# ============================================================
-# SPOT PRICE
-# ============================================================
-
-def get_spot_price(symbol):
-
-    data = api_get(
-        f"{SPOT_API}/api/v3/ticker/price",
-        {"symbol": symbol}
-    )
-
-    if not data:
-        return None
-
-    try:
-        return float(data["price"])
-    except:
-        return None
-
-
-# ============================================================
-# FUTURES PRICE
-# ============================================================
-
-def get_futures_price(symbol):
-
-    data = api_get(
-        f"{FUTURES_API}/fapi/v1/ticker/price",
-        {"symbol": symbol}
-    )
-
-    if not data:
-        return None
-
-    try:
-        return float(data["price"])
-    except:
-        return None
-
-
-# ============================================================
-# 24H FUTURES STATISTICS
-# ============================================================
-
-def get_futures_24h(symbol):
-
-    data = api_get(
-        f"{FUTURES_API}/fapi/v1/ticker/24hr",
-        {"symbol": symbol}
-    )
-
-    if not data:
-        return None
-
-    try:
-
-        return {
-            "price_change": float(data["priceChange"]),
-            "price_change_percent": float(data["priceChangePercent"]),
-            "volume": float(data["volume"]),
-            "quote_volume": float(data["quoteVolume"]),
-            "high": float(data["highPrice"]),
-            "low": float(data["lowPrice"])
-        }
-
-    except:
-        return None
-
-
-# ============================================================
-# KLINES
-# ============================================================
-
-def get_futures_klines(symbol, interval):
-
-    data = api_get(
-        f"{FUTURES_API}/fapi/v1/klines",
-        {
-            "symbol": symbol,
-            "interval": interval,
-            "limit": KLINE_LIMIT
-        }
-    )
-
-    if not data:
-        return None
-
-    try:
-
-        df = pd.DataFrame(
-            data,
-            columns=[
-                "open_time",
-                "open",
-                "high",
-                "low",
-                "close",
-                "volume",
-                "close_time",
-                "quote_volume",
-                "trades",
-                "taker_buy_base",
-                "taker_buy_quote",
-                "ignore"
-            ]
-        )
-
-        numeric_columns = [
-            "open",
-            "high",
-            "low",
-            "close",
-            "volume",
-            "quote_volume",
-            "taker_buy_base",
-            "taker_buy_quote"
-        ]
-
-        for col in numeric_columns:
-            df[col] = pd.to_numeric(
-                df[col],
-                errors="coerce"
-            )
-
-        df["open_time"] = pd.to_datetime(
-            df["open_time"],
-            unit="ms"
-        )
-
-        return df
-
-    except:
-        return None
-
-
-# ============================================================
-# RSI
-# ============================================================
-
-def calculate_rsi(series, period=14):
-
-    delta = series.diff()
-
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-
-    avg_gain = gain.ewm(
-        alpha=1 / period,
-        adjust=False
-    ).mean()
-
-    avg_loss = loss.ewm(
-        alpha=1 / period,
-        adjust=False
-    ).mean()
-
-    rs = avg_gain / avg_loss.replace(0, pd.NA)
-
-    rsi = 100 - (
-        100 / (1 + rs)
-    )
-
-    return rsi.fillna(50)
-
-
-# ============================================================
-# VWAP
-# ============================================================
-
-def calculate_vwap(df):
-
-    typical_price = (
-        df["high"]
-        + df["low"]
-        + df["close"]
-    ) / 3
-
-    cumulative_volume = df["volume"].cumsum()
-
-    cumulative_value = (
-        typical_price * df["volume"]
-    ).cumsum()
-
-    return cumulative_value / cumulative_volume
-
-
-# ============================================================
-# INDICATORS
-# ============================================================
-
-def calculate_indicators(df):
-
-    df = df.copy()
-
-    df["ema9"] = df["close"].ewm(
-        span=9,
-        adjust=False
-    ).mean()
-
-    df["ema21"] = df["close"].ewm(
-        span=21,
-        adjust=False
-    ).mean()
-
-    df["ema50"] = df["close"].ewm(
-        span=50,
-        adjust=False
-    ).mean()
-
-    df["ema200"] = df["close"].ewm(
-        span=200,
-        adjust=False
-    ).mean()
-
-    df["rsi"] = calculate_rsi(
-        df["close"],
-        14
-    )
-
-    df["vwap"] = calculate_vwap(df)
-
-    df["volume_ma20"] = df["volume"].rolling(
-        20
-    ).mean()
-
-    df["volume_ratio"] = (
-        df["volume"]
-        / df["volume_ma20"]
-    )
-
-    return df
-
-
-# ============================================================
-# SIGNAL ENGINE
-# ============================================================
-
-def generate_signal(df):
-
-    if df is None or len(df) < 200:
-        return {
-            "signal": "WAIT",
-            "confidence": 0,
-            "reasons": [
-                "Yeterli gerçek mum verisi bekleniyor."
-            ]
-        }
-
-    last = df.iloc[-1]
-
-    score = 0
-    reasons = []
-
-    # --------------------------------------------------------
-    # EMA
-    # --------------------------------------------------------
-
-    if last["ema9"] > last["ema21"]:
-
-        score += 2
-
-        reasons.append(
-            "EMA 9 > EMA 21 → kısa vadeli bullish yapı"
-        )
-
-    else:
-
-        score -= 2
-
-        reasons.append(
-            "EMA 9 < EMA 21 → kısa vadeli bearish yapı"
-        )
-
-    # --------------------------------------------------------
-    # EMA 50
-    # --------------------------------------------------------
-
-    if last["close"] > last["ema50"]:
-
-        score += 1
-
-        reasons.append(
-            "Fiyat EMA 50 üzerinde"
-        )
-
-    else:
-
-        score -= 1
-
-        reasons.append(
-            "Fiyat EMA 50 altında"
-        )
-
-    # --------------------------------------------------------
-    # EMA 200
-    # --------------------------------------------------------
-
-    if last["close"] > last["ema200"]:
-
-        score += 2
-
-        reasons.append(
-            "Fiyat EMA 200 üzerinde → ana trend bullish"
-        )
-
-    else:
-
-        score -= 2
-
-        reasons.append(
-            "Fiyat EMA 200 altında → ana trend bearish"
-        )
-
-    # --------------------------------------------------------
-    # RSI
-    # --------------------------------------------------------
-
-    rsi = float(last["rsi"])
-
-    if 50 < rsi < 70:
-
-        score += 1
-
-        reasons.append(
-            f"RSI {rsi:.1f} → bullish momentum"
-        )
-
-    elif 30 < rsi < 50:
-
-        score -= 1
-
-        reasons.append(
-            f"RSI {rsi:.1f} → bearish momentum"
-        )
-
-    elif rsi >= 70:
-
-        reasons.append(
-            f"RSI {rsi:.1f} → aşırı alım bölgesi"
-        )
-
-    elif rsi <= 30:
-
-        reasons.append(
-            f"RSI {rsi:.1f} → aşırı satım bölgesi"
-        )
-
-    # --------------------------------------------------------
-    # VWAP
-    # --------------------------------------------------------
-
-    if last["close"] > last["vwap"]:
-
-        score += 1
-
-        reasons.append(
-            "Fiyat VWAP üzerinde"
-        )
-
-    else:
-
-        score -= 1
-
-        reasons.append(
-            "Fiyat VWAP altında"
-        )
-
-    # --------------------------------------------------------
-    # VOLUME
-    # --------------------------------------------------------
-
-    volume_ratio = last["volume_ratio"]
-
-    if pd.notna(volume_ratio):
-
-        if volume_ratio >= 1.5:
-
-            if score > 0:
-                score += 1
-
-            elif score < 0:
-                score -= 1
-
-            reasons.append(
-                f"Hacim güçlü → {volume_ratio:.2f}x ortalama"
-            )
-
-        else:
-
-            reasons.append(
-                f"Hacim normal → {volume_ratio:.2f}x ortalama"
-            )
-
-    # --------------------------------------------------------
-    # FINAL SIGNAL
-    # --------------------------------------------------------
-
-    max_score = 8
-
-    confidence = min(
-        99,
-        int(
-            50
-            + abs(score) / max_score * 49
-        )
-    )
-
-    # Güçlü fikir yoksa WAIT
-    if abs(score) < 3:
-
-        signal = "WAIT"
-
-        confidence = max(
-            50,
-            100 - confidence
-        )
-
-    elif score >= 3:
-
-        signal = "LONG"
-
-    else:
-
-        signal = "SHORT"
-
-    return {
-        "signal": signal,
-        "confidence": confidence,
-        "score": score,
-        "rsi": rsi,
-        "reasons": reasons
-    }
-
-
-# ============================================================
-# WHALE SCANNER
-# ============================================================
-
-def get_whale_trades(symbol):
-
-    data = api_get(
-        f"{FUTURES_API}/fapi/v1/aggTrades",
-        {
-            "symbol": symbol,
-            "limit": 100
-        }
-    )
-
-    if not data:
-        return []
-
-    whales = []
-
-    for trade in data:
-
-        try:
-
-            price = float(trade["p"])
-            quantity = float(trade["q"])
-
-            usdt_value = price * quantity
-
-            if usdt_value >= WHALE_USDT_THRESHOLD:
-
-                # m = buyer was market maker
-                # m=True → seller aggressor
-                # m=False → buyer aggressor
-
-                side = (
-                    "SELL"
-                    if trade["m"]
-                    else "BUY"
-                )
-
-                whales.append({
-                    "side": side,
-                    "price": price,
-                    "quantity": quantity,
-                    "usdt": usdt_value,
-                    "time": datetime.fromtimestamp(
-                        trade["T"] / 1000,
-                        timezone.utc
-                    ).strftime("%H:%M:%S")
-                })
-
-        except:
-            continue
-
-    return whales
-
-
-# ============================================================
-# SYMBOLS
-# ============================================================
-
-@st.cache_data(ttl=300)
-def get_usdt_symbols():
-
-    data = api_get(
-        f"{FUTURES_API}/fapi/v1/exchangeInfo"
-    )
-
-    if not data:
-        return []
-
-    symbols = []
-
-    try:
-
-        for item in data["symbols"]:
-
-            if (
-                item.get("quoteAsset") == "USDT"
-                and item.get("status") == "TRADING"
-                and item.get("contractType") == "PERPETUAL"
-            ):
-
-                symbols.append(
-                    item["symbol"]
-                )
-
-    except:
-        pass
-
-    return sorted(symbols)
-
-
-# ============================================================
-# HEADER
-# ============================================================
-
-st.markdown(
-    '<div class="main-title">Juno₿TWHunteR 🌎₿</div>',
-    unsafe_allow_html=True
-)
-
-st.markdown(
-    '<div class="sub-title">'
-    'REAL-TIME BINANCE MARKET INTELLIGENCE — NO MOCK DATA'
-    '</div>',
-    unsafe_allow_html=True
-)
-
-# ============================================================
-# SIDEBAR
-# ============================================================
-
-with st.sidebar:
-
-    st.header("⚙️ Market Settings")
-
-    symbol = st.text_input(
-        "Coin",
-        value="BTCUSDT"
-    ).upper().strip()
-
-    timeframe = st.selectbox(
-        "Timeframe",
-        [
-            "1m",
-            "3m",
-            "5m",
-            "15m",
-            "30m",
-            "1h",
-            "4h",
-            "1d"
-        ],
-        index=3
-    )
-
-    whale_threshold = st.number_input(
-        "🐋 Whale Threshold (USDT)",
-        min_value=10000,
-        max_value=10000000,
-        value=WHALE_USDT_THRESHOLD,
-        step=10000
-    )
-
-    if st.button("🔄 Şimdi Yenile"):
-        st.rerun()
-
-
-# ============================================================
-# REAL MARKET DATA
-# ============================================================
-
-spot_price = get_spot_price(symbol)
-
-futures_price = get_futures_price(symbol)
-
-stats = get_futures_24h(symbol)
-
-df = get_futures_klines(
-    symbol,
-    timeframe
-)
-
-# ============================================================
-# DATA VALIDATION
-# ============================================================
-
-if futures_price is None or df is None:
-
-    st.error(
-        "❌ Gerçek Binance verisi alınamadı. "
-        "Sistem sahte veri göstermiyor."
-    )
-
-    st.stop()
-
-
-df = calculate_indicators(df)
-
-signal_data = generate_signal(df)
-
-# ============================================================
-# MARKET HEADER
-# ============================================================
-
-c1, c2, c3, c4 = st.columns(4)
-
-with c1:
-
-    st.markdown(
-        f"""
-        <div class="market-card">
-            <div class="market-label">
-                BINANCE SPOT
-            </div>
-            <div class="market-value">
-                ${spot_price:,.2f}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-with c2:
-
-    st.markdown(
-        f"""
-        <div class="market-card">
-            <div class="market-label">
-                BINANCE USDT-M PERPETUAL
-            </div>
-            <div class="market-value">
-                ${futures_price:,.2f}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-with c3:
-
-    change = (
-        stats["price_change_percent"]
-        if stats
-        else 0
-    )
-
-    change_text = (
-        f"{change:+.2f}%"
-    )
-
-    st.markdown(
-        f"""
-        <div class="market-card">
-            <div class="market-label">
-                24H CHANGE
-            </div>
-            <div class="market-value">
-                {change_text}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-with c4:
-
-    st.markdown(
-        f"""
-        <div class="market-card">
-            <div class="market-label">
-                TIMEFRAME
-            </div>
-            <div class="market-value">
-                {timeframe.upper()}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-st.write("")
-
-
-# ============================================================
-# MAIN SIGNAL
-# ============================================================
-
-signal = signal_data["signal"]
-
-confidence = signal_data["confidence"]
-
-if signal == "LONG":
-
-    st.markdown(
-        f"""
-        <div class="signal-long">
-            🟢 LONG
-        </div>
-        <div class="confidence">
-            Güven: {confidence}%
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-elif signal == "SHORT":
-
-    st.markdown(
-        f"""
-        <div class="signal-short">
-            🔴 SHORT
-        </div>
-        <div class="confidence">
-            Güven: {confidence}%
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-else:
-
-    st.markdown(
-        f"""
-        <div class="signal-wait">
-            ⚪ WAIT
-        </div>
-        <div class="confidence">
-            Güven: {confidence}%
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-# ============================================================
-# INDICATOR VALUES
-# ============================================================
-
-last = df.iloc[-1]
-
-st.write("")
-
-st.subheader("📊 Gerçek Teknik Veriler")
-
-i1, i2, i3, i4, i5 = st.columns(5)
-
-with i1:
-    st.metric(
-        "RSI",
-        f"{last['rsi']:.2f}"
-    )
-
-with i2:
-    st.metric(
-        "EMA 9",
-        f"{last['ema9']:,.2f}"
-    )
-
-with i3:
-    st.metric(
-        "EMA 21",
-        f"{last['ema21']:,.2f}"
-    )
-
-with i4:
-    st.metric(
-        "EMA 50",
-        f"{last['ema50']:,.2f}"
-    )
-
-with i5:
-    st.metric(
-        "EMA 200",
-        f"{last['ema200']:,.2f}"
-    )
-
-
-# ============================================================
-# VWAP
-# ============================================================
-
-v1, v2, v3 = st.columns(3)
-
-with v1:
-
-    st.metric(
-        "VWAP",
-        f"{last['vwap']:,.2f}"
-    )
-
-with v2:
-
-    st.metric(
-        "Volume",
-        f"{last['volume']:,.2f}"
-    )
-
-with v3:
-
-    ratio = last["volume_ratio"]
-
-    if pd.notna(ratio):
-
-        st.metric(
-            "Volume Ratio",
-            f"{ratio:.2f}x"
-        )
-
-    else:
-
-        st.metric(
-            "Volume Ratio",
-            "N/A"
-        )
-
-
-# ============================================================
-# SIGNAL REASONS
-# ============================================================
-
-st.subheader("🧠 Sinyal Nedenleri")
-
-for reason in signal_data["reasons"]:
-
-    st.markdown(
-        f"""
-        <div class="reason">
-            {reason}
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-# ============================================================
-# PRICE CHART
-# ============================================================
-
-st.subheader(
-    f"📈 {symbol} — {timeframe.upper()} Gerçek Binance Futures Grafiği"
-)
-
-chart_df = df[
-    [
-        "open_time",
-        "open",
-        "high",
-        "low",
-        "close"
-    ]
-].copy()
-
-chart_df = chart_df.set_index(
-    "open_time"
-)
-
-st.line_chart(
-    chart_df["close"],
-    height=400
-)
-
-
-# ============================================================
-# WHALE SCANNER
-# ============================================================
-
-st.subheader(
-    f"🐋 Whale Scanner — Son Büyük İşlemler "
-    f"(≥ ${whale_threshold:,.0f})"
-)
-
-# Kullanıcının sidebar threshold değerini fonksiyona uyguluyoruz
-WHALE_USDT_THRESHOLD = whale_threshold
-
-whales = get_whale_trades(symbol)
-
-if whales:
-
-    whale_df = pd.DataFrame(
-        whales
-    )
-
-    whale_df["usdt"] = whale_df["usdt"].map(
-        lambda x: f"${x:,.0f}"
-    )
-
-    whale_df["price"] = whale_df["price"].map(
-        lambda x: f"${x:,.2f}"
-    )
-
-    whale_df["quantity"] = whale_df["quantity"].map(
-        lambda x: f"{x:,.6f}"
-    )
-
-    whale_df.columns = [
-        "Yön",
-        "Fiyat",
-        "Miktar",
-        "İşlem Değeri",
-        "UTC Saat"
-    ]
-
-    st.dataframe(
-        whale_df,
-        use_container_width=True,
-        hide_index=True
-    )
-
-else:
-
-    st.info(
-        "Son gerçek işlemler içinde belirlenen whale "
-        "eşiğini geçen işlem bulunamadı."
-    )
-
-
-# ============================================================
-# DATA STATUS
-# ============================================================
-
-utc_time = datetime.now(
-    timezone.utc
-).strftime("%Y-%m-%d %H:%M:%S UTC")
-
-st.markdown(
-    f"""
-    <hr>
-    <div style="text-align:center;color:#758096;font-size:12px;">
-        🟢 LIVE REAL DATA |
-        Binance USDT-M |
-        Last update: {utc_time}
-        <br>
-        ❌ Mock Data Disabled |
-        ❌ Demo Data Disabled
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-
-# ============================================================
-# AUTO REFRESH
-# ============================================================
-
-time.sleep(
-    REFRESH_SECONDS
-)
-
-st.rerun()
+Juno₿TWHunteR için Streamlit tabanlı gerçek zamanlı kripto piyasa istihbarat uygulamasını baştan ve TEK PARÇA olarak oluştur.
+
+ÇOK ÖNEMLİ:
+- SADECE GERÇEK PİYASA VERİSİ KULLAN.
+- MOCK DATA KULLANMA.
+- DEMO DATA KULLANMA.
+- RANDOM DATA KULLANMA.
+- SAHTE / TÜRETİLMİŞ FİYAT KULLANMA.
+- API başarısız olduğunda kesinlikle sahte veri gösterme.
+- Veri alınamazsa ekranda açıkça "GERÇEK VERİ ALINAMIYOR" ve gerçek hata mesajını göster.
+- Uygulama hiçbir veriyi gerçekmiş gibi uydurmasın.
+- Özellikle Futures fiyatını Spot fiyatından matematiksel olarak üretme.
+
+VERİ KAYNAĞI:
+İlk aşamada Binance resmi public market API'larını kullan.
+
+Spot:
+https://api.binance.com
+
+USDT-M Futures:
+https://fapi.binance.com
+
+API anahtarı gerektirmeyen public market endpointlerini kullan.
+
+GERÇEK VERİLER:
+- Binance Spot gerçek fiyat
+- Binance USDT-M Perpetual gerçek fiyat
+- 24 saatlik gerçek değişim
+- Gerçek 24h high/low
+- Gerçek hacim
+- Gerçek OHLCV mum verileri
+- Gerçek işlem sayısı
+- Gerçek taker buy/sell verileri
+- Gerçek Futures market verileri
+- Gerçek aggTrades verileri
+
+VERİ DOĞRULAMA:
+Her API isteğinde HTTP status code kontrol et.
+Timeout ve connection hatalarını yakala.
+JSON/API hata mesajlarını kullanıcıya göster.
+API başarısız olduğunda veri alanında "N/A" veya "VERİ ALINAMIYOR" göster.
+Eski/stale veriyi yeni veriymiş gibi gösterme.
+Spot API ve Futures API bağlantısını uygulama açılışında ayrı ayrı test et.
+Ekranda:
+🟢 SPOT API: ONLINE
+🟢 FUTURES API: ONLINE
+veya
+🔴 SPOT API: OFFLINE
+🔴 FUTURES API: OFFLINE
+şeklinde bağlantı durumu göster.
+
+ARAYÜZ:
+Koyu profesyonel bir trading dashboard tasarla.
+
+Başlık:
+Juno₿TWHunteR 🌎₿
+
+Alt başlık:
+REAL-TIME CRYPTO MARKET INTELLIGENCE
+
+Alt bilgi:
+REAL DATA ONLY — NO MOCK / NO DEMO DATA
+
+Ana ekranda büyük şekilde:
+
+🟢 LONG
+🔴 SHORT
+⚪ WAIT
+
+LONG kesinlikle yeşil renkte ve çok belirgin olsun.
+SHORT kesinlikle kırmızı renkte ve çok belirgin olsun.
+WAIT gri/nötr renkte olsun.
+
+Sinyalin hemen altında:
+GÜVEN: XX%
+
+Sinyal kartı mobil telefonda da çok net okunabilsin.
+
+COIN SEÇİMİ:
+Varsayılan:
+BTCUSDT
+
+Kullanıcı farklı Binance USDT-M perpetual coin seçebilsin.
+
+Timeframe seçenekleri:
+1m
+3m
+5m
+15m
+30m
+1h
+4h
+1d
+
+TEKNİK ANALİZ:
+Gerçek Binance Futures OHLCV verilerinden hesapla:
+
+- EMA 9
+- EMA 21
+- EMA 50
+- EMA 200
+- RSI 14
+- VWAP
+- Volume
+- Volume MA20
+- Volume Ratio
+- Fiyatın EMA'lara uzaklığı
+- Trend yönü
+- Momentum
+
+RSI, EMA ve VWAP değerlerini gerçek mum verilerinden hesapla.
+
+SİNYAL MOTORU:
+Sinyal rastgele oluşturulmayacak.
+
+EMA 9/21
+EMA 50
+EMA 200
+RSI
+VWAP
+Volume Ratio
+fiyat hareketi
+ve mümkün olan gerçek order-flow verilerini birlikte değerlendir.
+
+Tek bir ana karar üret:
+
+LONG
+SHORT
+WAIT
+
+Sinyal nedenlerini ekranda açıkça göster.
+
+Örnek:
+EMA 9 > EMA 21 → bullish
+Fiyat EMA 200 üzerinde → ana trend bullish
+RSI → momentum
+Fiyat VWAP üzerinde
+Hacim → ortalamanın X katı
+
+Sinyal motoru yeterince güçlü bir yön göstermiyorsa:
+WAIT
+
+Sinyal kesinlikle garanti olarak sunulmasın.
+Bu sistem teknik piyasa analizi üretir; kesin kazanç iddiasında bulunmaz.
+
+GÜVEN PUANI:
+0-100 arasında hesapla.
+
+Ancak güven yüzdesi tamamen rastgele veya sabit olmasın.
+Kullanılan gerçek teknik göstergelerin uyumuna göre hesapla.
+
+GRAFİK:
+Gerçek Binance Futures mum verilerini göster.
+Sadece basit line chart kullanmak yerine mümkünse TradingView benzeri candlestick görünümü oluştur.
+
+Grafikte:
+- Mumlar
+- EMA 9
+- EMA 21
+- EMA 50
+- EMA 200
+- VWAP
+gösterilebilsin.
+
+Grafik:
+- zoom
+- pan
+- timeframe değiştirme
+- responsive/mobile görünüm
+özelliklerine sahip olsun.
+
+WHALE SCANNER:
+Binance Futures gerçek aggTrades verisini kullan.
+
+Son büyük işlemleri göster.
+
+Her işlem için:
+- BUY / SELL
+- fiyat
+- miktar
+- USDT işlem değeri
+- zaman
+
+Varsayılan whale threshold:
+100000 USDT
+
+Kullanıcı threshold değiştirebilsin.
+
+Whale işlemlerinde:
+BUY = yeşil
+SELL = kırmızı
+
+ÖNEMLİ:
+Whale Scanner'da "100.000 USDT üzeri işlem" ile "gerçek balina/tekil yatırımcı" kavramlarını birbirine karıştırma.
+Veri sadece Binance'ın gerçek aggregate trade verisidir.
+Bunu kullanıcıya açıkça belirt.
+
+GERÇEK ORDER FLOW:
+Mümkün olduğu kadar Binance Futures public market verilerinden:
+- aggressive buy volume
+- aggressive sell volume
+- buy/sell imbalance
+- taker buy/sell
+verilerini hesapla.
+
+Ekranda:
+BUY PRESSURE
+SELL PRESSURE
+ORDER FLOW IMBALANCE
+göster.
+
+PRICE PANEL:
+Üst bölümde:
+
+BINANCE SPOT
+$ gerçek spot fiyat
+
+BINANCE USDT-M PERPETUAL
+$ gerçek futures fiyat
+
+24H CHANGE
+gerçek %
+
+24H HIGH
+gerçek $
+
+24H LOW
+gerçek $
+
+24H VOLUME
+gerçek değer
+
+Spot ve Futures fiyatlarını birbirinden bağımsız olarak API'dan al.
+KESİNLİKLE:
+Spot × 1.0002
+veya herhangi başka bir formülle Futures fiyatı üretme.
+
+CANLI VERİ:
+İlk sürümde 5 saniyelik polling kullanılabilir ancak bunu güvenli şekilde yap.
+
+Uygulama:
+- veri güncellendiğinde son güncelleme zamanını göster
+- veri alınamazsa hata durumunu göster
+- sonsuz/kararsız rerun döngüsü oluşturma
+- API rate limitlerine dikkat et
+
+Daha profesyonel ikinci aşama için kodu WebSocket'e geçmeye uygun şekilde modüler tasarla.
+
+İKİNCİ AŞAMAYA HAZIRLIK:
+Kod yapısını gelecekte aşağıdakileri ekleyebileceğimiz şekilde oluştur:
+
+1. Binance WebSocket
+2. Gerçek zamanlı fiyat akışı
+3. Gerçek zamanlı trades
+4. Gerçek zamanlı aggTrades
+5. Gerçek order-flow
+6. Gerçek order-book depth
+7. Bid/Ask imbalance
+8. Whale alert
+9. Çoklu timeframe analizi
+10. Multi-exchange veri karşılaştırması
+11. Daha gelişmiş LONG/SHORT/WAIT sinyal motoru
+
+İLK AŞAMADA API KEY GEREKTİRMEYEN PUBLIC MARKET DATA KULLAN.
+Kullanıcı hesabı, emir verme veya otomatik trade özelliği oluşturma.
+SADECE MARKET DATA VE ANALİZ.
+
+HATA YÖNETİMİ:
+Kodun hiçbir yerinde:
+
+except Exception:
+    return None
+
+şeklinde hatayı tamamen gizleme.
+
+Hata olduğunda:
+- hangi endpoint
+- hangi API
+- HTTP status
+- Binance hata mesajı
+- connection/timeout bilgisi
+
+kullanıcıya okunabilir şekilde göster.
+
+Örneğin:
+
+🔴 BINANCE FUTURES API OFFLINE
+Endpoint: /fapi/v1/...
+Hata: ...
+HTTP: ...
+
+Böylece uygulama hata verdiğinde problemi teşhis edebileyim.
+
+DEPENDENCIES:
+Gerekli Python paketlerini açıkça belirt ve mümkünse requirements.txt oluştur:
+
+streamlit
+pandas
+requests
+plotly
+
+Candlestick grafik için Plotly kullan.
+
+MOBİL TASARIM:
+Uygulama telefon ekranında düzgün görünsün.
+Ana LONG/SHORT/WAIT sinyali ekranda en belirgin unsur olsun.
+Kartlar responsive olsun.
+Sidebar mobilde kullanılabilir olsun.
+
+ALT BÖLÜM:
+Gerçek veri durumunu göster:
+
+🟢 LIVE REAL DATA
+Binance Spot: ONLINE
+Binance Futures: ONLINE
+
+Last update:
+UTC zamanı
+
+Türkiye saati:
+UTC+3
+
+Mock Data: DISABLED
+Demo Data: DISABLED
+
+KODU TAMAMEN ÇALIŞIR HALDE TEK PARÇA OLUŞTUR.
+Yarım kod bırakma.
+Eksik fonksiyon bırakma.
+Placeholder veri bırakma.
+Mock/demo veri ekleme.
+
+Uygulama başlatıldığında önce Binance bağlantılarını test etsin.
+Bağlantı başarısızsa nedenini açıkça göstersin ve sahte veri göstermesin.
+
+ÖNEMLİ:
+İlk sürümün amacı mükemmel görünmek değil, ÖNCE GERÇEK VERİNİN SORUNSUZ GELMESİDİR.
+
+Önce gerçek Binance verisini çalıştır.
+Sonra teknik analiz.
+Sonra LONG/SHORT/WAIT.
+Sonra Whale Scanner.
+Sonra grafik.
+
+Tüm sistemi tek bir Streamlit uygulaması olarak oluştur.
