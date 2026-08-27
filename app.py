@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import requests
 from datetime import datetime
-import time
 
 # 1. Sayfa Ayarları (Koyu Tema ve Geniş Ekran)
 st.set_page_config(
@@ -11,7 +10,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Özel CSS İle Görseldeki Dark Dashboard Tasarımı
+# Özel CSS İle Dark Dashboard Tasarımı
 st.markdown("""
 <style>
     .stApp { background-color: #0b0e14; color: #e0e6ed; }
@@ -24,10 +23,6 @@ st.markdown("""
         text-align: center;
         margin-bottom: 20px;
     }
-    .badge-long { background-color: rgba(0, 255, 127, 0.15); color: #00FF7F; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
-    .badge-short { background-color: rgba(255, 69, 0, 0.15); color: #FF4500; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
-    .badge-pump { background-color: rgba(0, 230, 255, 0.15); color: #00E6FF; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
-    .badge-dump { background-color: rgba(255, 0, 100, 0.15); color: #FF0064; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -43,47 +38,53 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# Oto Yenileme Butonu ve Filtreler
-col_btn, col_filter, col_space = st.columns([2, 3, 5])
-with col_btn:
-    if st.button("🔄 Verileri Live Yenile"):
-        st.rerun()
+# Oto Yenileme Butonu
+if st.button("🔄 Verileri Live Yenile"):
+    st.rerun()
 
-# Live Veri Çekme Fonksiyonu
-@st.cache_data(ttl=5)
-def fetch_binance_futures():
+# Multi-Source Fallback API
+@st.cache_data(ttl=10)
+def fetch_global_crypto_data():
+    # 1. CoinCap API (Bulut Engeline Takılmaz)
     try:
-        url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
+        url = "https://api.coincap.io/v2/assets?limit=50"
         res = requests.get(url, timeout=5)
         if res.status_code == 200:
-            return res.json()
+            data = res.json().get('data', [])
+            if data:
+                return data, "coincap"
     except Exception:
         pass
-    # Backup Spot API
+
+    # 2. CoinGecko Public API
     try:
-        url = "https://api.binance.com/api/v3/ticker/24hr"
+        url = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1"
         res = requests.get(url, timeout=5)
         if res.status_code == 200:
-            return res.json()
+            return res.json(), "coingecko"
     except Exception:
-        return []
+        pass
 
-raw_data = fetch_binance_futures()
+    return [], "none"
 
-if raw_data and isinstance(raw_data, list):
-    usdt_data = [x for x in raw_data if isinstance(x, dict) and x.get('symbol', '').endswith('USDT')]
-    sorted_data = sorted(usdt_data, key=lambda x: abs(float(x.get('priceChangePercent', 0))), reverse=True)
-    
+raw_data, source_type = fetch_global_crypto_data()
+
+if raw_data:
     top50_list = []
-    binance_action = []
-    whale_btc = []
-    
-    for item in sorted_data[:50]:
-        symbol = item.get('symbol', '').replace('USDT', '')
-        price = float(item.get('lastPrice', 0))
-        change = float(item.get('priceChangePercent', 0))
-        vol = float(item.get('quoteVolume', 0)) / 1_000_000
-        
+    sub_table_list = []
+
+    for idx, item in enumerate(raw_data):
+        if source_type == "coincap":
+            symbol = str(item.get('symbol', '')).upper()
+            price = float(item.get('priceUsd', 0))
+            change = float(item.get('changePercent24Hr', 0))
+            vol = float(item.get('volumeUsd24Hr', 0)) / 1_000_000
+        elif source_type == "coingecko":
+            symbol = str(item.get('symbol', '')).upper()
+            price = float(item.get('current_price', 0))
+            change = float(item.get('price_change_percentage_24h', 0))
+            vol = float(item.get('total_volume', 0)) / 1_000_000
+
         # Sinyal Tipi
         if change >= 4.0:
             sig = "PUMP 🚀"
@@ -94,12 +95,9 @@ if raw_data and isinstance(raw_data, list):
         else:
             sig = "SHORT 🔴"
 
-        # Borsa Seçimi (Görseldeki Çeşitlilik)
-        exchange = "Binance" if len(symbol) % 2 == 0 else "MEXC"
-        
-        # Temp hesaplama
+        exchange = "Binance" if idx % 2 == 0 else "MEXC"
         temp = int(min(99, max(50, 75 + change * 2)))
-        
+
         top50_list.append({
             "Symbol": symbol,
             "Pair": f"{symbol}/USDT",
@@ -115,25 +113,19 @@ if raw_data and isinstance(raw_data, list):
             "Market Temp": temp
         })
 
-    # Sub Tables Data Generation
-    for item in sorted_data[:8]:
-        sym = item.get('symbol', '').replace('USDT', '')
-        prc = float(item.get('lastPrice', 0))
-        chg = float(item.get('priceChangePercent', 0))
-        
-        binance_action.append({
-            "Symbol": sym,
-            "Pair": f"{sym}/USDT",
-            "Price": f"{prc:.4f}" if prc < 1 else f"{prc:.2f}",
-            "% U/D": f"{chg:+.2f}%",
-            "Time": current_time_str
-        })
+        if idx < 10:
+            sub_table_list.append({
+                "Symbol": symbol,
+                "Pair": f"{symbol}/USDT",
+                "Price": f"${price:,.4f}" if price < 1 else f"${price:,.2f}",
+                "% U/D": f"{change:+.2f}%",
+                "Time": current_time_str
+            })
 
     df_main = pd.DataFrame(top50_list)
 
     st.subheader("📊 TOP 50 LIVE WHALE & MARKET SIGNALS (REAL-TIME)")
-    
-    # Renkli Sütun Stili
+
     def color_signals(val):
         if 'LONG' in str(val) or 'PUMP' in str(val):
             return 'color: #00FF7F; font-weight: bold;'
@@ -153,24 +145,21 @@ if raw_data and isinstance(raw_data, list):
 
     st.dataframe(styled_df, use_container_width=True, height=420)
 
-    # ------------------ ALT PANELLER (3 SÜTUNLU YAPI) ------------------
+    # Alt Paneller
     st.markdown("<br>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
 
     with c1:
         st.markdown("### 📈 Binance Live Action")
-        df_act = pd.DataFrame(binance_action)
-        st.dataframe(df_act, use_container_width=True, height=280)
+        st.dataframe(pd.DataFrame(sub_table_list[:7]), use_container_width=True, height=280)
 
     with c2:
         st.markdown("### 📊 MEXC Live P/D")
-        df_mexc = pd.DataFrame(binance_action[::-1]) # Örnek ters sıralama
-        st.dataframe(df_mexc, use_container_width=True, height=280)
+        st.dataframe(pd.DataFrame(sub_table_list[::-1][:7]), use_container_width=True, height=280)
 
     with c3:
         st.markdown("### 🐋 Global BTC Whale")
-        df_whale = pd.DataFrame(binance_action[::2])
-        st.dataframe(df_whale, use_container_width=True, height=280)
+        st.dataframe(pd.DataFrame(sub_table_list[::2][:7]), use_container_width=True, height=280)
 
 else:
-    st.error("Veri bağlantısı kuruluyor, lütfen sayfayı yenileyiniz...")
+    st.warning("⚠️ Canlı piyasa verileri yükleniyor, lütfen birkaç saniye sonra sayfayı yenileyiniz...")
