@@ -1,866 +1,430 @@
-import streamlit as st
-import requests
-import pandas as pd
-from datetime import datetime, timezone
-
-# ============================================================
-# JUNO₿TWHUNTER
-# OKX REAL MARKET DATA
-# NO MOCK / NO DEMO DATA
-# ============================================================
-
-st.set_page_config(
-    page_title="Juno₿TWHunteR",
-    page_icon="₿",
-    layout="wide"
-)
-
-OKX_URL = "https://www.okx.com"
-TIMEOUT = 10
-
-
-# ============================================================
-# STYLE
-# ============================================================
-
-st.markdown("""
-<style>
-
-.stApp {
-    background-color: #05070b;
-    color: #ffffff;
-}
-
-.title {
-    text-align: center;
-    font-size: 34px;
-    font-weight: 900;
-    color: #ffffff;
-}
-
-.subtitle {
-    text-align: center;
-    color: #8d98aa;
-    font-size: 13px;
-    margin-bottom: 25px;
-}
-
-.card {
-    background: #111722;
-    border: 1px solid #293449;
-    border-radius: 14px;
-    padding: 20px;
-    text-align: center;
-}
-
-.label {
-    color: #8d98aa;
-    font-size: 11px;
-    font-weight: 800;
-}
-
-.value {
-    color: #ffffff;
-    font-size: 24px;
-    font-weight: 900;
-    margin-top: 8px;
-}
-
-.online {
-    color: #00e676;
-    font-weight: 900;
-}
-
-.offline {
-    color: #ff304f;
-    font-weight: 900;
-}
-
-.long {
-    background: rgba(0,230,118,0.12);
-    border: 2px solid #00e676;
-    color: #00ff88;
-    border-radius: 16px;
-    padding: 24px;
-    text-align: center;
-    font-size: 38px;
-    font-weight: 900;
-}
-
-.short {
-    background: rgba(255,48,79,0.12);
-    border: 2px solid #ff304f;
-    color: #ff304f;
-    border-radius: 16px;
-    padding: 24px;
-    text-align: center;
-    font-size: 38px;
-    font-weight: 900;
-}
-
-.wait {
-    background: rgba(150,160,175,0.10);
-    border: 2px solid #778196;
-    color: #b8c0cc;
-    border-radius: 16px;
-    padding: 24px;
-    text-align: center;
-    font-size: 38px;
-    font-weight: 900;
-}
-
-.reason {
-    background: #111722;
-    border-left: 4px solid #344155;
-    padding: 10px 14px;
-    margin-bottom: 7px;
-    border-radius: 6px;
-}
+Juno₿TWHunteR uygulamasını tamamen düzelt ve profesyonel hale getir.
+
+ÖNEMLİ:
+Ben Python kodu bilmiyorum. Bana parça parça kod verme. Mevcut app.py dosyasının tamamını kendin düzenle ve çalışır TAM DOSYA olarak oluştur. Mevcut kodu tamamen değiştirmen gerekiyorsa değiştir. Ben sadece kopyala-yapıştır yapacağım.
+
+AMAÇ:
+Juno₿TWHunteR gerçek zamanlı kripto piyasa istihbarat uygulamasıdır.
+
+KESİNLİKLE:
+- MOCK DATA KULLANMA.
+- DEMO DATA KULLANMA.
+- RASTGELE ÜRETİLMİŞ FİYAT KULLANMA.
+- SAHTE SİNYAL ÜRETME.
+- Binance API kullanma; bulunduğum ortamda Binance API 451 restricted-location hatası veriyor.
+- Ana veri kaynağı OKX olsun.
+- Gerçek OKX public API ve OKX public WebSocket kullan.
+- API verisi alınamazsa sahte veri göstermek yerine açıkça OFFLINE/HATA göster.
+- Uygulama hiçbir durumda sahte veriyle çalışmaya devam etmesin.
+
+BAĞIMLILIKLAR:
+Gerekli paketleri otomatik olarak requirements.txt içine ekle:
+streamlit
+pandas
+requests
+websocket-client
+
+Eğer plotly kullanmıyorsan kesinlikle import etme.
+Eksik paket yüzünden ModuleNotFoundError oluşmasına izin verme.
+
+OKX VERİLERİ:
+Ana market:
+BTC-USDT-SWAP
+
+Kullanıcı sidebar üzerinden coin değiştirebilsin.
+Örnek:
+BTC
+ETH
+SOL
+XRP
+DOGE
 
-</style>
-""", unsafe_allow_html=True)
+Girilen coin otomatik olarak:
+COIN-USDT-SWAP
+formatına dönüştürülsün.
 
+GERÇEK REST VERİLERİ:
+OKX public REST API üzerinden:
+- Son fiyat
+- 24H değişim
+- 24H high
+- 24H low
+- 24H volume
+- quote volume
+- mum verileri
 
-# ============================================================
-# TITLE
-# ============================================================
+alınsın.
 
-st.markdown(
-    '<div class="title">Juno₿TWHunteR 🌎₿</div>',
-    unsafe_allow_html=True
-)
+GERÇEK WEBSOCKET:
+OKX public WebSocket kullan.
 
-st.markdown(
-    '<div class="subtitle">'
-    'REAL-TIME OKX MARKET INTELLIGENCE — NO MOCK / NO DEMO'
-    '</div>',
-    unsafe_allow_html=True
-)
+Aşağıdaki kanalları mümkün olduğunca gerçek zamanlı kullan:
+- tickers
+- trades
+- books5
 
+WebSocket bağlantısı:
+wss://ws.okx.com:8443/ws/v5/public
 
-# ============================================================
-# SIDEBAR
-# ============================================================
+WebSocket otomatik reconnect yapmalı.
+Bağlantı koparsa yeniden bağlanmalı.
+Bağlantı durumunu ekranda göster:
 
-st.sidebar.header("⚙️ Market Settings")
+🟢 OKX WEBSOCKET — LIVE
+🟡 OKX WEBSOCKET — RECONNECTING
+🔴 OKX WEBSOCKET — OFFLINE
 
-coin = st.sidebar.text_input(
-    "Coin",
-    value="BTC"
-).upper().strip()
+REST API durumunu da göster:
 
-timeframe = st.sidebar.selectbox(
-    "Timeframe",
-    [
-        "1m",
-        "3m",
-        "5m",
-        "15m",
-        "30m",
-        "1H",
-        "4H",
-        "1D"
-    ],
-    index=3
-)
+🟢 OKX REST API — ONLINE
+🔴 OKX REST API — OFFLINE
 
-if st.sidebar.button("🔄 Gerçek Veriyi Yenile"):
-    st.rerun()
+GERÇEK CANLI FİYAT:
+WebSocket ticker verisinden gerçek zamanlı fiyat göster.
 
+Ekranda:
+💰 BTC/USDT PERPETUAL
+LIVE PRICE
 
-# ============================================================
-# OKX SYMBOL
-# ============================================================
+göster.
 
-inst_id = coin + "-USDT-SWAP"
+BID / ASK:
+Gerçek WebSocket order book verisinden:
+- Bid
+- Ask
+- Bid Size
+- Ask Size
+- Spread
+- Order Book Imbalance
 
+göster.
 
-# ============================================================
-# SAFE OKX REQUEST
-# ============================================================
+ORDER BOOK IMBALANCE:
+Gerçek bid ve ask miktarlarını kullan.
 
-def okx_get(endpoint, params=None):
+Formül:
 
-    try:
+imbalance =
+(bid_size - ask_size) /
+(bid_size + ask_size) * 100
 
-        response = requests.get(
-            OKX_URL + endpoint,
-            params=params,
-            timeout=TIMEOUT,
-            headers={
-                "User-Agent": "JunoBTWHunteR/1.0"
-            }
-        )
+Sonucu:
++% değer = alıcı baskısı
+-% değer = satıcı baskısı
 
-        text = response.text
+olarak göster.
 
-        if response.status_code != 200:
+GERÇEK ALIM/SATIM AKIŞI:
+OKX WebSocket trades kanalından gerçek işlemleri al.
 
-            return None, (
-                f"HTTP {response.status_code}: {text}"
-            )
+Her işlem için:
+- BUY veya SELL
+- fiyat
+- miktar
+- işlem değeri
+- UTC saat
 
-        try:
+göster.
 
-            data = response.json()
+BUY işlemlerini ekranda belirgin YEŞİL göster.
+SELL işlemlerini belirgin KIRMIZI göster.
 
-        except Exception:
+FLOW:
+Gerçek WebSocket işlemlerinden:
+BUY FLOW
+SELL FLOW
 
-            return None, (
-                "OKX JSON olmayan cevap döndürdü: "
-                + text[:500]
-            )
+hesapla.
 
-        return data, None
+Flow imbalance:
 
-    except Exception as error:
+(buy_volume - sell_volume) /
+(buy_volume + sell_volume) * 100
 
-        return None, str(error)
+olarak hesaplanmalı.
 
+WHALE SCANNER:
+Gerçek trades verisini kullan.
 
-# ============================================================
-# TICKER
-# ============================================================
+Sidebar'da:
+🐋 Whale Threshold (USDT)
 
-def get_ticker():
-
-    data, error = okx_get(
-        "/api/v5/market/ticker",
-        {
-            "instId": inst_id
-        }
-    )
-
-    if error:
-        return None, error
-
-    try:
-
-        if data["code"] != "0":
-            return None, str(data)
-
-        if not data["data"]:
-            return None, "OKX sembol bulunamadı."
-
-        item = data["data"][0]
-
-        last = float(item["last"])
-        open24 = float(item["open24h"])
-
-        change = (
-            (last - open24)
-            / open24
-            * 100
-        )
+ayarını oluştur.
 
-        return {
-            "price": last,
-            "open": open24,
-            "change": change,
-            "high": float(item["high24h"]),
-            "low": float(item["low24h"]),
-            "volume": float(item["vol24h"]),
-            "quote_volume": float(item["volCcy24h"])
-        }, None
+Varsayılan:
+100000 USDT
 
-    except Exception as error:
+Kullanıcı değiştirebilsin.
 
-        return None, str(error)
+İşlem değeri threshold'dan büyük/eşitse whale olarak göster.
 
+BUY whale:
+🟢 BUY WHALE
 
-# ============================================================
-# CANDLES
-# ============================================================
+SELL whale:
+🔴 SELL WHALE
 
-def get_candles():
+göster.
 
-    interval_map = {
-        "1m": "1m",
-        "3m": "3m",
-        "5m": "5m",
-        "15m": "15m",
-        "30m": "30m",
-        "1H": "1H",
-        "4H": "4H",
-        "1D": "1D"
-    }
+Kesinlikle sahte whale üretme.
 
-    data, error = okx_get(
-        "/api/v5/market/candles",
-        {
-            "instId": inst_id,
-            "bar": interval_map[timeframe],
-            "limit": "200"
-        }
-    )
+TEKNİK ANALİZ:
+Gerçek OKX mumlarından hesapla:
 
-    if error:
-        return None, error
+EMA 9
+EMA 21
+EMA 50
+EMA 200
+RSI 14
+VWAP
+Volume
+Volume MA20
+Volume Ratio
 
-    try:
+Bunların tamamı gerçek mum verisinden hesaplanmalı.
 
-        if data["code"] != "0":
-            return None, str(data)
+SİNYAL MOTORU:
+Juno₿TWHunteR şu üç sonuçtan yalnızca birini üretsin:
 
-        rows = data["data"]
+🟢 LONG
+🔴 SHORT
+⚪ WAIT
 
-        rows.reverse()
+Sinyal motoru aşağıdaki gerçek verileri birlikte değerlendirsin:
 
-        df = pd.DataFrame(
-            rows,
-            columns=[
-                "timestamp",
-                "open",
-                "high",
-                "low",
-                "close",
-                "volume",
-                "volume_currency",
-                "volume_usdt",
-                "confirm"
-            ]
-        )
+1. EMA 9 / EMA 21
+2. EMA 50
+3. EMA 200
+4. RSI
+5. VWAP
+6. Volume Ratio
+7. Order Book Imbalance
+8. BUY/SELL Flow Imbalance
+9. Whale BUY/SELL aktivitesi
 
-        df["timestamp"] = pd.to_datetime(
-            pd.to_numeric(df["timestamp"]),
-            unit="ms"
-        )
+ÖNEMLİ:
+Sadece tek bir indikatöre bakarak LONG veya SHORT verme.
 
-        numeric_columns = [
-            "open",
-            "high",
-            "low",
-            "close",
-            "volume",
-            "volume_currency",
-            "volume_usdt"
-        ]
+Çelişkili piyasa koşullarında WAIT üret.
 
-        for column in numeric_columns:
+Örneğin:
+EMA bullish ama order flow güçlü bearish ise körü körüne LONG verme.
 
-            df[column] = pd.to_numeric(
-                df[column],
-                errors="coerce"
-            )
+SİNYAL GÜCÜ:
+Eski sistemdeki yapay "%92 güven" mantığını kullanma.
 
-        return df, None
+Bunun yerine:
+Sinyal Gücü: 0–100
 
-    except Exception as error:
+puanı oluştur.
 
-        return None, str(error)
+Bu değer kesinlikle "işlemin kazanma ihtimali %92" gibi gösterilmesin.
 
+Başlığını:
+🎯 SİNYAL GÜCÜ
 
-# ============================================================
-# GET REAL DATA
-# ============================================================
+olarak göster.
 
-ticker, ticker_error = get_ticker()
+LONG:
+Yeşil arka plan
+Yeşil yazı
+Belirgin büyük LONG kutusu
 
-candles, candles_error = get_candles()
+SHORT:
+Kırmızı arka plan
+Kırmızı yazı
+Belirgin büyük SHORT kutusu
 
+WAIT:
+Gri/sarı ton
+Belirgin WAIT kutusu
 
-# ============================================================
-# API STATUS
-# ============================================================
+Kullanıcı ekrana baktığında LONG ve SHORT ilk bakışta net şekilde ayırt edilebilmeli.
 
-st.subheader("🌐 Gerçek Veri Kaynağı")
-
-if ticker is not None:
+SİNYAL NEDENLERİ:
+Sinyalin neden üretildiğini Türkçe olarak göster.
 
-    st.markdown(
-        '<div class="online">'
-        '🟢 OKX API — ONLINE'
-        '</div>',
-        unsafe_allow_html=True
-    )
+Örnek:
 
-else:
+EMA 9 > EMA 21 → kısa vadeli bullish
+Fiyat EMA 200 üzerinde → ana trend bullish
+RSI 56 → bullish momentum
+Order Book → alıcı baskısı
+Flow → BUY baskısı
+Whale Activity → BUY
 
-    st.markdown(
-        '<div class="offline">'
-        '🔴 OKX API — OFFLINE'
-        '</div>',
-        unsafe_allow_html=True
-    )
+Ancak yalnızca gerçek verilerden gelen nedenleri göster.
 
-    st.code(str(ticker_error))
+GRAFİK:
+Mevcut basit line chart yerine mümkün olduğunca profesyonel bir gerçek mum grafiği oluştur.
 
-    st.stop()
+Plotly kullanacaksan requirements.txt içine:
+plotly
 
+ekle.
 
-# ============================================================
-# MARKET HEADER
-# ============================================================
+Eğer Plotly kullanmıyorsan import plotly yapma.
 
-st.subheader(
-    f"💰 {coin}/USDT PERPETUAL"
-)
+Grafikte:
+- Candlestick
+- EMA 9
+- EMA 21
+- EMA 50
+- EMA 200
+- mümkünse VWAP
 
-c1, c2, c3, c4 = st.columns(4)
+göster.
 
+Grafik:
+- zoom
+- pan
+- mouse hover
+- timeframe değişimi
 
-with c1:
+desteklesin.
 
-    st.markdown(
-        f"""
-        <div class="card">
-            <div class="label">
-                OKX LIVE PRICE
-            </div>
-            <div class="value">
-                ${ticker["price"]:,.2f}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+TIMEFRAME:
+Sidebar'da:
 
+1m
+3m
+5m
+15m
+30m
+1H
+4H
+1D
 
-with c2:
+seçenekleri olsun.
 
-    st.markdown(
-        f"""
-        <div class="card">
-            <div class="label">
-                24H CHANGE
-            </div>
-            <div class="value">
-                {ticker["change"]:+.2f}%
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+OKX'in desteklediği uygun bar değerlerini kullan.
 
+EKRAN TASARIMI:
+Tamamen koyu profesyonel terminal görünümü oluştur.
 
-with c3:
+Başlık:
 
-    st.markdown(
-        f"""
-        <div class="card">
-            <div class="label">
-                24H HIGH
-            </div>
-            <div class="value">
-                ${ticker["high"]:,.2f}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+Juno₿TWHunteR 🌎₿
 
+Alt başlık:
 
-with c4:
+REAL-TIME OKX MARKET INTELLIGENCE
 
-    st.markdown(
-        f"""
-        <div class="card">
-            <div class="label">
-                24H LOW
-            </div>
-            <div class="value">
-                ${ticker["low"]:,.2f}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+Üst bölümde:
+- LIVE PRICE
+- 24H CHANGE
+- 24H HIGH
+- 24H LOW
 
+göster.
 
-# ============================================================
-# VOLUME
-# ============================================================
+Sonra:
 
-st.subheader("📊 Gerçek Piyasa Hacmi")
+🌐 DATA CONNECTION
+💰 MARKET
+📚 ORDER BOOK
+⚡ REAL BUY/SELL FLOW
+🐋 WHALE SCANNER
+🎯 JUNO₿TWHUNTER SIGNAL
+📈 TECHNICAL ANALYSIS
+🧠 SIGNAL REASONS
+📊 REAL-TIME CHART
+⚡ LIVE TRADES
 
-v1, v2 = st.columns(2)
+bölümleri olsun.
 
-with v1:
+VERİ DURUMU:
+Ekranın altında:
 
-    st.metric(
-        "24H Volume",
-        f"{ticker['volume']:,.2f}"
-    )
+🟢 OKX REAL DATA
+🟢 WEBSOCKET LIVE
+❌ MOCK DATA
+❌ DEMO DATA
 
-with v2:
+göster.
 
-    st.metric(
-        "24H Quote Volume",
-        f"${ticker['quote_volume']:,.0f}"
-    )
+Son güncelleme UTC saatini göster.
 
+HATA YÖNETİMİ:
+Kodda hiçbir yerde boş veya bozuk try/except yapısı bırakma.
 
-# ============================================================
-# CANDLE DATA
-# ============================================================
+SyntaxError oluşturma.
 
-if candles is None:
+Özellikle:
+try:
+    ...
+except:
+    ...
 
-    st.error(
-        "❌ Gerçek OKX mum verisi alınamadı."
-    )
+bloklarının eksik kalmadığından emin ol.
 
-    st.code(str(candles_error))
+Her fonksiyon düzgün kapanmalı.
 
-    st.stop()
+Tüm parantezleri, girintileri ve Python syntax'ını kontrol et.
 
+Uygulama başlatıldığında siyah boş ekran oluşmasın.
 
-# ============================================================
-# INDICATORS
-# ============================================================
+API başarısızsa kullanıcıya anlaşılır hata mesajı göster.
 
-candles["EMA9"] = candles["close"].ewm(
-    span=9,
-    adjust=False
-).mean()
+API'den veri gelmiyorsa:
+"Gerçek piyasa verisi alınamadı. Sahte veri gösterilmiyor."
+mesajını göster.
 
-candles["EMA21"] = candles["close"].ewm(
-    span=21,
-    adjust=False
-).mean()
+AUTO REFRESH:
+WebSocket canlı akışı kullanıldığı için gereksiz yere her 1-2 saniyede tüm REST API'yi tekrar çağırma.
 
-candles["EMA50"] = candles["close"].ewm(
-    span=50,
-    adjust=False
-).mean()
+REST verilerini makul aralıklarla yenile.
 
-candles["EMA200"] = candles["close"].ewm(
-    span=200,
-    adjust=False
-).mean()
+WebSocket gerçek zamanlı veriyi mümkün olduğunca sürekli kullansın.
 
+Streamlit üzerinde stabil çalışması için gerekiyorsa kontrollü ekran yenileme kullan.
 
-# ============================================================
-# RSI
-# ============================================================
+ÖNEMLİ:
+Streamlit Cloud ortamında çalışacak şekilde tasarla.
 
-delta = candles["close"].diff()
+Thread/WebSocket kullanımını Streamlit ile uyumlu ve güvenli yap.
 
-gain = delta.clip(lower=0)
+WebSocket thread'i uygulamayı kilitlemesin.
 
-loss = -delta.clip(upper=0)
+Bağlantı koparsa uygulama çökmemeli.
 
-avg_gain = gain.ewm(
-    alpha=1 / 14,
-    adjust=False
-).mean()
+WebSocket yeniden bağlanabilmeli.
 
-avg_loss = loss.ewm(
-    alpha=1 / 14,
-    adjust=False
-).mean()
+SON KONTROL:
+Kod tamamlandıktan sonra kendi içinde kontrol et:
 
-rs = avg_gain / avg_loss.replace(
-    0,
-    pd.NA
-)
+1. SyntaxError var mı?
+2. Eksik import var mı?
+3. requirements.txt eksik mi?
+4. plotly import ediliyor ama requirements.txt'de yok mu?
+5. Binance API yanlışlıkla kullanılıyor mu?
+6. Mock/demo veri var mı?
+7. Sahte fiyat üreten kod var mı?
+8. Sahte whale var mı?
+9. Sahte sinyal var mı?
+10. OKX REST çalışıyor mu?
+11. OKX WebSocket doğru endpoint'i kullanıyor mu?
+12. LONG yeşil mi?
+13. SHORT kırmızı mı?
+14. WAIT belirgin mi?
+15. Gerçek BUY/SELL trades gösteriliyor mu?
+16. Gerçek order book gösteriliyor mu?
+17. Whale scanner gerçek trades kullanıyor mu?
+18. Teknik indikatörler gerçek mumlardan mı hesaplanıyor?
+19. Uygulama veri alınamadığında sahte veri göstermiyor mu?
+20. Streamlit Cloud üzerinde çalışabilecek durumda mı?
 
-candles["RSI"] = (
-    100
-    - (
-        100
-        / (1 + rs)
-    )
-)
+Bütün bunları düzelttikten sonra bana sadece tamamlanmış, çalışır proje dosyalarını oluştur.
 
-candles["RSI"] = candles["RSI"].fillna(50)
+BEN KOD BİLMİYORUM.
+BU NEDENLE PARÇA PARÇA TALİMAT VERME.
+MEVCUT KODU TAMAMEN DÜZELT.
+app.py VE GEREKLİ requirements.txt DOSYASINI HAZIRLA.
 
+AMAÇ:
+Önce çalışan ve stabil gerçek OKX REST + WebSocket sistemi oluştur.
+Daha sonra bu temel üzerine daha gelişmiş AI/sinyal motoru ekleyeceğiz.
 
-# ============================================================
-# LAST CANDLE
-# ============================================================
-
-last = candles.iloc[-1]
-
-
-# ============================================================
-# SIGNAL ENGINE
-# ============================================================
-
-score = 0
-
-reasons = []
-
-
-if last["EMA9"] > last["EMA21"]:
-
-    score += 1
-
-    reasons.append(
-        "EMA 9 > EMA 21 → kısa vadeli yükseliş"
-    )
-
-else:
-
-    score -= 1
-
-    reasons.append(
-        "EMA 9 < EMA 21 → kısa vadeli düşüş"
-    )
-
-
-if last["close"] > last["EMA50"]:
-
-    score += 1
-
-    reasons.append(
-        "Fiyat EMA 50 üzerinde"
-    )
-
-else:
-
-    score -= 1
-
-    reasons.append(
-        "Fiyat EMA 50 altında"
-    )
-
-
-if last["close"] > last["EMA200"]:
-
-    score += 1
-
-    reasons.append(
-        "Fiyat EMA 200 üzerinde"
-    )
-
-else:
-
-    score -= 1
-
-    reasons.append(
-        "Fiyat EMA 200 altında"
-    )
-
-
-if 50 < last["RSI"] < 70:
-
-    score += 1
-
-    reasons.append(
-        f"RSI {last['RSI']:.2f} → bullish momentum"
-    )
-
-elif 30 < last["RSI"] < 50:
-
-    score -= 1
-
-    reasons.append(
-        f"RSI {last['RSI']:.2f} → bearish momentum"
-    )
-
-elif last["RSI"] >= 70:
-
-    reasons.append(
-        f"RSI {last['RSI']:.2f} → aşırı alım"
-    )
-
-else:
-
-    reasons.append(
-        f"RSI {last['RSI']:.2f} → aşırı satım"
-    )
-
-
-# ============================================================
-# FINAL SIGNAL
-# ============================================================
-
-if score >= 2:
-
-    signal = "LONG"
-
-    confidence = 60 + score * 8
-
-elif score <= -2:
-
-    signal = "SHORT"
-
-    confidence = 60 + abs(score) * 8
-
-else:
-
-    signal = "WAIT"
-
-    confidence = 50
-
-
-confidence = min(
-    confidence,
-    95
-)
-
-
-# ============================================================
-# SIGNAL DISPLAY
-# ============================================================
-
-st.subheader("🎯 Juno₿TWHunteR Sinyali")
-
-if signal == "LONG":
-
-    st.markdown(
-        f"""
-        <div class="long">
-            🟢 LONG
-            <br>
-            <span style="font-size:20px;">
-                Güven: {confidence}%
-            </span>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-elif signal == "SHORT":
-
-    st.markdown(
-        f"""
-        <div class="short">
-            🔴 SHORT
-            <br>
-            <span style="font-size:20px;">
-                Güven: {confidence}%
-            </span>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-else:
-
-    st.markdown(
-        f"""
-        <div class="wait">
-            ⚪ WAIT
-            <br>
-            <span style="font-size:20px;">
-                Güven: {confidence}%
-            </span>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-# ============================================================
-# INDICATOR VALUES
-# ============================================================
-
-st.subheader("📈 Gerçek Teknik Veriler")
-
-i1, i2, i3, i4, i5 = st.columns(5)
-
-with i1:
-
-    st.metric(
-        "RSI",
-        f"{last['RSI']:.2f}"
-    )
-
-with i2:
-
-    st.metric(
-        "EMA 9",
-        f"${last['EMA9']:,.2f}"
-    )
-
-with i3:
-
-    st.metric(
-        "EMA 21",
-        f"${last['EMA21']:,.2f}"
-    )
-
-with i4:
-
-    st.metric(
-        "EMA 50",
-        f"${last['EMA50']:,.2f}"
-    )
-
-with i5:
-
-    st.metric(
-        "EMA 200",
-        f"${last['EMA200']:,.2f}"
-    )
-
-
-# ============================================================
-# SIGNAL REASONS
-# ============================================================
-
-st.subheader("🧠 Sinyal Nedenleri")
-
-for reason in reasons:
-
-    st.markdown(
-        f"""
-        <div class="reason">
-            {reason}
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-# ============================================================
-# REAL CANDLE CHART
-# ============================================================
-
-st.subheader(
-    f"📊 {coin}/USDT — {timeframe}"
-)
-
-chart = candles.set_index(
-    "timestamp"
-)
-
-st.line_chart(
-    chart["close"],
-    height=400
-)
-
-
-# ============================================================
-# RAW REAL DATA
-# ============================================================
-
-with st.expander(
-    "🔎 Gerçek OKX Mum Verisini Gör"
-):
-
-    st.dataframe(
-        candles.tail(50),
-        use_container_width=True,
-        hide_index=True
-    )
-
-
-# ============================================================
-# FOOTER
-# ============================================================
-
-utc_now = datetime.now(
-    timezone.utc
-)
-
-st.divider()
-
-st.markdown(
-    f"""
-    <div style="
-        text-align:center;
-        color:#748095;
-        font-size:12px;
-    ">
-        🟢 OKX REAL DATA<br>
-        ❌ MOCK DATA<br>
-        ❌ DEMO DATA<br>
-        Last Update:
-        {utc_now.strftime("%Y-%m-%d %H:%M:%S UTC")}
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+KESİNLİKLE GERÇEK VERİ.
+KESİNLİKLE MOCK YOK.
+KESİNLİKLE DEMO YOK.
